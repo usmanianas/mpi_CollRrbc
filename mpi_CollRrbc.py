@@ -460,12 +460,28 @@ def imposePBCs(P):
 while True:
 
     if iCnt % opInt == 0:
-        if rank == 0:
-            Re = np.mean(np.sqrt(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0))/nu
-            Nu = 1.0 + np.mean(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])/kappa
-            maxDiv = getDiv(U, V, W)
+        locE, locWT, totalE, totalWT = np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1)  
+        #Re = np.mean(np.sqrt(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0))/nu
+        locE[0] = np.sum(0.5*U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0)
+        #print(locE)
+        comm.Reduce(locE, totalE, op=MPI.SUM, root=0)
+        
+        locWT[0] = np.sum(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])
+        comm.Reduce(locWT, totalWT, op=MPI.SUM, root=0)
 
+        #Nu = 1.0 + np.mean(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])/kappa
+
+        maxDiv = getDiv(U, V, W)
+
+        if rank == 0:
+            Re = np.sqrt(2)*totalE/(Nx*Ny*Nz)/nu
+            Nu = 1.0 + (totalWT/(Nx*Ny*Nz))/kappa
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+
+
+
+        
+
 
 
     Hx = computeNLinDiff_X(U, V, W)
