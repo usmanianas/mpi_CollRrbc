@@ -11,7 +11,7 @@ import random
 #### Grid Parameters ###########################
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 64, 64, 64
+Nx, Ny, Nz = 32, 32, 32
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
 
@@ -34,12 +34,24 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
 
-bn = int((Nx/nprocs)*rank)
-en = int(bn + (Nx/nprocs) - 1)
+locn = int(Nz/nprocs)
+bn = 1 + locn*rank
+en = bn + locn 
+
+if rank == nprocs-1:
+    en = Nz-1
+
+
+'''
+bn = int((Nz/nprocs)*rank)
+en = int(bn + (Nz/nprocs) - 1)
+
 if rank == 0:
     bn = 1
-
-print(rank, bn, en)
+#if rank == nprocs-1:
+#    en = en-1    
+'''
+#print(rank, bn, en)
 
 
 
@@ -50,8 +62,8 @@ Pr = 0.786
 
 Ta = 0.0e7
 
-if rank == 0:
-    print("#", "Ra=", Ra, "Pr=", Pr, "Ta=", Ta)
+#if rank == 0:
+ #   print("#", "Ra=", Ra, "Pr=", Pr, "Ta=", Ta)
 
 #Ro = np.sqrt(Ra/(Ta*Pr))
 
@@ -100,6 +112,8 @@ V = np.zeros([Nx, Ny, Nz])
 
 W = np.zeros([Nx, Ny, Nz])
 
+#print(P.dtype)
+
 
 Hx = np.zeros_like(U)
 Hy = np.zeros_like(V)
@@ -143,12 +157,44 @@ def getDiv(U, V, W):
                                 (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])*0.5/hy +
                                 (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])*0.5/hz)
     
+    locdivMax = np.max(divMat)
+
+    #print(locdivMax)
+
+    totdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
+
     #return np.unravel_index(divNyat.argmax(), divMat.shape), np.mean(divMat)
-    return np.max(divMat)
+    return totdivMax
 
 
 
+def data_transfer(F):
 
+    if rank == 0:
+        F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
+        #F = comm.Sendrecv([F[:, :, en-1], MPI.DOUBLE], dest = rank+1, source = rank+1)
+        #comm.Send([F, MPI.DOUBLE], dest = rank+1)
+        #F[:, :, en] = comm.Recv(source = rank+1)
+
+    if rank > 0 and rank < nprocs-1:
+        F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
+        F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
+
+        #F = comm.Sendrecv([F[:, :, en-1], MPI.DOUBLE], dest = rank+1, source = rank+1)
+        #F = comm.Sendrecv([F[:, :, bn], MPI.DOUBLE], dest = rank-1, source = rank-1)   
+
+        #comm.Send([F, MPI.DOUBLE], dest = rank+1)
+        #F[:, :, en] = comm.Recv(source = rank+1)
+
+        #comm.Send([F, MPI.DOUBLE], dest = rank-1)
+        #F[:, :, bn-1] = comm.Recv(source = rank-1)                                       
+
+    if rank == nprocs-1:
+        F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
+        #F = comm.sendrecv([F[:, :, bn], MPI.DOUBLE], dest = rank-1, source = rank-1)    
+
+        #comm.Send([F, MPI.DOUBLE], dest = rank-1)
+        #F[:, :, bn-1] = comm.Recv(source = rank-1)
 
 
 
@@ -163,7 +209,7 @@ def computeNLinDiff_X(U, V, W):
                               V[1:Nx-1, 1:Ny-1, bn:en]*(U[1:Nx-1, 2:Ny, bn:en] - U[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
                               W[1:Nx-1, 1:Ny-1, bn:en]*(U[1:Nx-1, 1:Ny-1, bn+1:en+1] - U[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
 
-    return Hx
+    return Hx[1:Nx-1, 1:Ny-1, bn:en]
 
 def computeNLinDiff_Y(U, V, W):
     global Hy
@@ -176,7 +222,7 @@ def computeNLinDiff_Y(U, V, W):
                               V[1:Nx-1, 1:Ny-1, bn:en]*(V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
                               W[1:Nx-1, 1:Ny-1, bn:en]*(V[1:Nx-1, 1:Ny-1, bn+1:en+1] - V[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
 
-    return Hy
+    return Hy[1:Nx-1, 1:Ny-1, bn:en]
 
 
 def computeNLinDiff_Z(U, V, W):
@@ -191,7 +237,7 @@ def computeNLinDiff_Z(U, V, W):
                               W[1:Nx-1, 1:Ny-1, bn:en]*(W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
 
 
-    return Hz
+    return Hz[1:Nx-1, 1:Ny-1, bn:en]
 
 
 def computeNLinDiff_T(U, V, W, T):
@@ -205,7 +251,7 @@ def computeNLinDiff_T(U, V, W, T):
                               V[1:Nx-1, 1:Ny-1, bn:en]*(T[1:Nx-1, 2:Ny, bn:en] - T[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
                               W[1:Nx-1, 1:Ny-1, bn:en]*(T[1:Nx-1, 1:Ny-1, bn+1:en+1] - T[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
 
-    return Ht
+    return Ht[1:Nx-1, 1:Ny-1, bn:en]
 
 
 #Jacobi iterative solver for U
@@ -224,27 +270,35 @@ def uJacobi(rho):
                                 nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
                             (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
         
-        U = temp_sol
+        U[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        data_transfer(U)
 
         imposeUBCs(U)
         
-        maxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (U[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
+        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (U[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
                             (U[0:Nx-2, 1:Ny-1, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[2:Nx, 1:Ny-1, bn:en])/hx2 +
                             (U[1:Nx-1, 0:Ny-2, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 2:Ny, bn:en])/hy2 +
                             (U[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
         
-            #if maxErr < tolerance:
-        if maxErr < VpTolerance:
+
+        #totmaxErr = comm.reduce(locmaxErr, op=MPI.MAX, root=0)
+
+
+        #if rank == 0:
+        #if locmaxErr < VpTolerance:
+        if jCnt > 10:
+
             #print(jCnt)
             break
         
         jCnt += 1
         if jCnt > maxCount:
                 print("ERROR: Jacobi not converging in U. Aborting")
-                print("Maximum error: ", maxErr)
+                #print("Maximum error: ", totmaxErr)
                 quit()
 
-    return U        
+    return U[1:Nx-1, 1:Ny-1, bn:en]        
 
 
 #Jacobi iterative solver for V
@@ -263,28 +317,37 @@ def vJacobi(rho):
                                 nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
                         (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
     
-        V = temp_sol
+        V[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        data_transfer(V)
 
         imposeVBCs(V)
 
 
-        maxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (V[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
+        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (V[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
                         (V[0:Nx-2, 1:Ny-1, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[2:Nx, 1:Ny-1, bn:en])/hx2 +
                         (V[1:Nx-1, 0:Ny-2, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 2:Ny, bn:en])/hy2 +
                         (V[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
     
-        #if maxErr < tolerance:
-        if maxErr < VpTolerance:
+        #totmaxErr = comm.reduce(locmaxErr, op=MPI.MAX, root=0)
+
+        #if rank == 0:
+        #    print(rank, locmaxErr)
+
+        #if rank == 0:
+        #if locmaxErr < VpTolerance:
+        if jCnt > 10:
+
             #print(jCnt)
             break
     
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in V. Aborting")
-            print("Maximum error: ", maxErr)
+            #print("Maximum error: ", totmaxErr)
             quit()
     
-    return V
+    return V[1:Nx-1, 1:Ny-1, bn:en]
 
 
 #Jacobi iterative solver for W
@@ -303,28 +366,37 @@ def wJacobi(rho):
                                 nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
                         (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
         
-        W = temp_sol
+        W[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        data_transfer(W)
     
         imposeWBCs(W)
 
 
-        maxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (W[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
+        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (W[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
                         (W[0:Nx-2, 1:Ny-1, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[2:Nx, 1:Ny-1, bn:en])/hx2 +
                         (W[1:Nx-1, 0:Ny-2, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 2:Ny, bn:en])/hy2 +
                         (W[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
     
-        #if maxErr < tolerance:
-        if maxErr < 1e-5:
+        #totmaxErr = comm.reduce(locmaxErr, op=MPI.MAX, root=0)
+
+        #if rank == 0:
+        #print(rank, locmaxErr)
+
+        #if rank == 0:
+        #if locmaxErr < VpTolerance:
             #print(jCnt)
+        if jCnt > 10:
+
             break
     
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in W. Aborting")
-            print("Maximum error: ", maxErr)
+            #print("Maximum error: ", totmaxErr)
             quit()
     
-    return W       
+    return W[1:Nx-1, 1:Ny-1, bn:en]       
 
 
 #Jacobi iterative solver for T
@@ -343,27 +415,35 @@ def TJacobi(rho):
                                 kappa*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
                         (1.0 + kappa*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
     
-        T = temp_sol
+        T[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        data_transfer(T)
 
         imposeTBCs(T)
 
-        maxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (T[1:Nx-1, 1:Ny-1, bn:en] - 0.5*kappa*dt*(
+        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (T[1:Nx-1, 1:Ny-1, bn:en] - 0.5*kappa*dt*(
                         (T[0:Nx-2, 1:Ny-1, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[2:Nx, 1:Ny-1, bn:en])/hx2 +
                         (T[1:Nx-1, 0:Ny-2, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 2:Ny, bn:en])/hy2 +
                         (T[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
     
-        #if maxErr < tolerance:
-        if maxErr < VpTolerance:
+        #totmaxErr = comm.reduce(locmaxErr, op=MPI.MAX, root=0)
+
+
+        #print(rank, locmaxErr)
+
+        #if rank == 0:
+        #if locmaxErr < VpTolerance:
+        if jCnt > 10:
             #print(jCnt)
             break
     
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in T. Aborting")
-            print("Maximum error: ", maxErr)
+            #print("Maximum error: ", totmaxErr)
             quit()
     
-    return T       
+    return T[1:Nx-1, 1:Ny-1, bn:en]       
 
 
 
@@ -406,17 +486,29 @@ def PoissonSolver(rho):
         #Ppp = Pp.copy()
 
         #imposePBCs(Pp)
+
+
+        data_transfer(Pp)
+
+        #locmaxErr, totmaxErr = np.zeros(1), np.zeros(1)
     
-        maxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] -((
+        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] -((
                         (Pp[0:Nx-2, 1:Ny-1, bn:en] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[2:Nx, 1:Ny-1, bn:en])/hx2 +
                         (Pp[1:Nx-1, 0:Ny-2, bn:en] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 2:Ny, bn:en])/hy2 +
                         (Pp[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
     
-    
-        #if (jCnt % 100 == 0):
-        #    print(maxErr)
-    
-        if maxErr < PoissonTolerance:
+        #totmaxErr = comm.reduce(locmaxErr, op=MPI.MAX, root=0)
+
+        #if rank == 0:
+        #    if (jCnt % 100 == 0):
+        #        print(totmaxErr)
+
+
+        #print(rank, locmaxErr)
+
+        #if rank == 0:
+        #if locmaxErr < PoissonTolerance:
+        if jCnt > 500:
             #print(jCnt)
             #print("Poisson solver converged")
             break
@@ -426,7 +518,7 @@ def PoissonSolver(rho):
             print("ERROR: Poisson solver not converging. Aborting")
             quit()
     
-    return Pp     
+    return Pp[1:Nx-1, 1:Ny-1, bn:en]     
 
 
 
@@ -459,38 +551,38 @@ def imposePBCs(P):
 
 while True:
 
-    if iCnt % opInt == 0:
-        locE, locWT, totalE, totalWT = np.zeros(1), np.zeros(1), np.zeros(1), np.zeros(1)  
-        #Re = np.mean(np.sqrt(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0))/nu
-        locE[0] = np.sum(0.5*U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0)
-        #print(locE)
-        comm.Reduce(locE, totalE, op=MPI.SUM, root=0)
-        
-        locWT[0] = np.sum(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])
-        comm.Reduce(locWT, totalWT, op=MPI.SUM, root=0)
+    #print(rank, bn, en)
 
-        #Nu = 1.0 + np.mean(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])/kappa
+    if iCnt % opInt == 0:
+
+        #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
+        locE = 0.5*np.sum(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0)
+
+        totalE = comm.reduce(locE, op=MPI.SUM, root=0)
+
+        
+        locWT = np.sum(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])
+        totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            Re = np.sqrt(2)*totalE/(Nx*Ny*Nz)/nu
+            Re = np.sqrt(2)*totalE/(nu*(Nx*Ny*Nz))
             Nu = 1.0 + (totalWT/(Nx*Ny*Nz))/kappa
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
-
-
         
 
-
-
-    Hx = computeNLinDiff_X(U, V, W)
-    Hy = computeNLinDiff_Y(U, V, W)
-    Hz = computeNLinDiff_Z(U, V, W)
-    Ht = computeNLinDiff_T(U, V, W, T)  
+    Hx[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_X(U, V, W)
+    Hy[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_Y(U, V, W)
+    Hz[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_Z(U, V, W)
+    Ht[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_T(U, V, W, T)  
 
     Hx[1:Nx-1, 1:Ny-1, bn:en] = U[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hx[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(-V[1:Nx-1, 1:Ny-1, bn:en]) - (P[2:Nx, 1:Ny-1, bn:en] - P[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx))
     uJacobi(Hx)
+
+    #if rank==2:
+    #    print(rank, locE)
 
     Hy[1:Nx-1, 1:Ny-1, bn:en] = V[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hy[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(U[1:Nx-1, 1:Ny-1, bn:en]) - (P[1:Nx-1, 2:Ny, bn:en] - P[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy))
     vJacobi(Hy)
@@ -502,17 +594,24 @@ while True:
     TJacobi(Ht)   
 
     rhs = np.zeros([Nx, Ny, Nz])
+
     rhs[1:Nx-1, 1:Ny-1, bn:en] = ((U[2:Nx, 1:Ny-1, bn:en] - U[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx) +
                                 (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) +
                                 (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))/dt
 
-    Pp = PoissonSolver(rhs)
+    Pp[1:Nx-1, 1:Ny-1, bn:en] = PoissonSolver(rhs)
 
-    P = P + Pp
+    P[1:Nx-1, 1:Ny-1, bn:en] = P[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn:en]
 
     U[1:Nx-1, 1:Ny-1, bn:en] = U[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[2:Nx, 1:Ny-1, bn:en] - Pp[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx)
     V[1:Nx-1, 1:Ny-1, bn:en] = V[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[1:Nx-1, 2:Ny, bn:en] - Pp[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy)
     W[1:Nx-1, 1:Ny-1, bn:en] = W[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[1:Nx-1, 1:Ny-1, bn+1:en+1] - Pp[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz)
+
+    data_transfer(U)
+    data_transfer(V)
+    data_transfer(W)
+    data_transfer(T)
+    data_transfer(P)
 
     imposeUBCs(U)                               
     imposeVBCs(V)                               
@@ -520,6 +619,7 @@ while True:
     imposePBCs(P)                               
     imposeTBCs(T)       
 
+    '''
     #if abs(fwTime - time) < 0.5*dt:
     if abs(time - tMax)<1e-5:
         writeSoln(U, V, W, P, T, time)
@@ -530,7 +630,9 @@ while True:
         plt.axis('scaled')
         clb.ax.set_title(r'$T$', fontsize = 20)
         plt.show()
-        fwTime = fwTime + fwInt                                 
+        fwTime = fwTime + fwInt      
+
+    '''
 
     if time > tMax:
         break   
@@ -538,6 +640,9 @@ while True:
     time = time + dt
 
     iCnt = iCnt + 1
+
+    #print("Hi6")
+
 
 
 
