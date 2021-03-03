@@ -158,7 +158,7 @@ def getDiv(U, V, W):
                                 (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])*0.5/hy +
                                 (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])*0.5/hz)
     
-    locdivMax = np.max(divMat)
+    locdivMax = np.max(abs(divMat))
 
     #print(locdivMax)
 
@@ -177,7 +177,6 @@ def data_transfer(F):
     if rank == 0:
 
         s1 = F[:, :, en-1].copy()
-        #r1 = F[:, :, en].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
 
@@ -189,12 +188,9 @@ def data_transfer(F):
 
         s1 = F[:, :, en-1].copy()
         s2 = F[:, :, bn].copy()
-        #r1 = F[:, :, en].copy()
-        #r2 = F[:, :, bn-1].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
-
 
         comm.Send(s1, dest = rank+1)
         comm.Recv(r1, source = rank+1)
@@ -207,7 +203,6 @@ def data_transfer(F):
     if rank == nprocs-1:
 
         s1 = F[:, :, bn].copy()
-        #r1 = F[:, :, bn-1].copy()
 
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
 
@@ -528,7 +523,7 @@ def PoissonSolver(rho):
         if totmaxErr < PoissonTolerance:
         #if jCnt > 500:
             #print(rank, totmaxErr)
-            print(jCnt)
+            #print(jCnt)
             #print("Poisson solver converged")
             break
 
@@ -579,21 +574,18 @@ while True:
 
         #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
         locE = 0.5*np.sum(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0)
-
         totalE = comm.reduce(locE, op=MPI.SUM, root=0)
-
-        
+       
         locWT = np.sum(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            Re = np.sqrt(2.0*totalE/((Nx-1)*(Ny-1)*(Nz-1)))/nu
-            Nu = 1.0 + totalWT/(kappa*((Nx-1)*(Ny-1)*(Nz-1)))
+            Re = np.sqrt(2.0*totalE/((Nx-2)*(Ny-2)*(Nz-2)))/nu
+            Nu = 1.0 + totalWT/(kappa*((Nx-2)*(Ny-2)*(Nz-2)))
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
-        
 
     Hx[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_X(U, V, W)
     Hy[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_Y(U, V, W)
@@ -602,9 +594,6 @@ while True:
 
     Hx[1:Nx-1, 1:Ny-1, bn:en] = U[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hx[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(-V[1:Nx-1, 1:Ny-1, bn:en]) - (P[2:Nx, 1:Ny-1, bn:en] - P[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx))
     uJacobi(Hx)
-
-    #if rank==2:
-    #    print(rank, locE)
 
     Hy[1:Nx-1, 1:Ny-1, bn:en] = V[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hy[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(U[1:Nx-1, 1:Ny-1, bn:en]) - (P[1:Nx-1, 2:Ny, bn:en] - P[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy))
     vJacobi(Hy)
@@ -624,7 +613,7 @@ while True:
     tp1 = datetime.now()
     Pp[1:Nx-1, 1:Ny-1, bn:en] = PoissonSolver(rhs)
     tp2 = datetime.now()
-    print(tp2-tp1)
+    #print(tp2-tp1)
 
     P[1:Nx-1, 1:Ny-1, bn:en] = P[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn:en]
 
@@ -668,7 +657,7 @@ while True:
 
     t2 = datetime.now()
 
-    print(t2-t1)
+    #print(t2-t1)
 
 
 
