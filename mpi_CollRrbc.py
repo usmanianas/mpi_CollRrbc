@@ -56,7 +56,7 @@ if rank == 0:
 
 
 #### Flow Parameters #############
-Ra = 1.0e5
+Ra = 1.0e4
 
 Pr = 0.786
 
@@ -569,8 +569,8 @@ while True:
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            Re = np.sqrt(2)*totalE/(nu*(Nx*Ny*Nz))
-            Nu = 1.0 + totalWT/(kappa*(Nx*Ny*Nz))
+            Re = np.sqrt(2.0*totalE/((Nx-1)*(Ny-1)*(Nz-1)))/nu
+            Nu = 1.0 + totalWT/(kappa*((Nx-1)*(Ny-1)*(Nz-1)))
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
         
