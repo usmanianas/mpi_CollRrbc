@@ -5,13 +5,14 @@ from matplotlib import cm
 import h5py as hp
 from mpi4py import MPI
 import time
+from datetime import datetime
 import random 
 
 
 #### Grid Parameters ###########################
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 16, 16, 16
+Nx, Ny, Nz = 32, 32, 32
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
 
@@ -56,7 +57,7 @@ if rank == 0:
 
 
 #### Flow Parameters #############
-Ra = 1.0e4
+Ra = 1.0e5
 
 Pr = 0.786
 
@@ -169,33 +170,50 @@ def getDiv(U, V, W):
 
 
 def data_transfer(F):
+    s1, s2 = np.zeros([Nx, Ny]), np.zeros([Nx, Ny])
+    r1, r2 = np.zeros([Nx, Ny]), np.zeros([Nx, Ny])
+
 
     if rank == 0:
-        F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
-        #F = comm.Sendrecv([F[:, :, en-1], MPI.DOUBLE], dest = rank+1, source = rank+1)
 
-        #comm.Send(F[:, :, en-1], dest = rank+1)
-        #comm.Recv(F[:, :, en], source = rank+1)
+        s1 = F[:, :, en-1].copy()
+        #r1 = F[:, :, en].copy()
+
+        #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
+
+        comm.Send(s1, dest = rank+1)
+        comm.Recv(r1, source = rank+1)
+        F[:, :, en] = r1
 
     if rank > 0 and rank < nprocs-1:
-        F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
-        F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
 
-        #F = comm.Sendrecv([F[:, :, en-1], MPI.DOUBLE], dest = rank+1, source = rank+1)
-        #F = comm.Sendrecv([F[:, :, bn], MPI.DOUBLE], dest = rank-1, source = rank-1)   
+        s1 = F[:, :, en-1].copy()
+        s2 = F[:, :, bn].copy()
+        #r1 = F[:, :, en].copy()
+        #r2 = F[:, :, bn-1].copy()
 
-        #comm.Send(F[:, :, en-1], dest = rank+1)
-        #comm.Recv(F[:, :, en], source = rank+1)
+        #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
+        #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
 
-        #comm.Send(F[:, :, en-1], dest = rank-1)
-        #comm.Recv(F[:, :, bn-1], source = rank-1)                                       
+
+        comm.Send(s1, dest = rank+1)
+        comm.Recv(r1, source = rank+1)
+        F[:, :, en] = r1
+
+        comm.Send(s2, dest = rank-1)
+        comm.Recv(r2, source = rank-1)  
+        F[:, :, bn-1] = r2                                     
 
     if rank == nprocs-1:
-        F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
-        #F = comm.sendrecv([F[:, :, bn], MPI.DOUBLE], dest = rank-1, source = rank-1)    
 
-        #comm.Send(F[:, :, bn], dest = rank-1)
-        #comm.Recv(F[:, :, bn-1], source = rank-1)
+        s1 = F[:, :, bn].copy()
+        #r1 = F[:, :, bn-1].copy()
+
+        #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
+
+        comm.Send(s1, dest = rank-1)
+        comm.Recv(r1, source = rank-1)
+        F[:, :, bn-1] = r1
 
 
 
@@ -500,8 +518,8 @@ def PoissonSolver(rho):
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         #if rank == 0:
-        #    if (jCnt % 100 == 0):
-        #        print(totmaxErr)
+        #if (jCnt % 100 == 0):
+            #print(rank, jCnt, totmaxErr)
 
 
         #print(rank, locmaxErr)
@@ -510,7 +528,7 @@ def PoissonSolver(rho):
         if totmaxErr < PoissonTolerance:
         #if jCnt > 500:
             #print(rank, totmaxErr)
-            #print(jCnt)
+            print(jCnt)
             #print("Poisson solver converged")
             break
 
@@ -554,6 +572,8 @@ def imposePBCs(P):
 while True:
 
     #print(rank, bn, en)
+
+    t1 = datetime.now()
 
     if iCnt % opInt == 0:
 
@@ -601,7 +621,10 @@ while True:
                                 (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) +
                                 (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))/dt
 
+    tp1 = datetime.now()
     Pp[1:Nx-1, 1:Ny-1, bn:en] = PoissonSolver(rhs)
+    tp2 = datetime.now()
+    print(tp2-tp1)
 
     P[1:Nx-1, 1:Ny-1, bn:en] = P[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn:en]
 
@@ -643,7 +666,11 @@ while True:
 
     iCnt = iCnt + 1
 
-    #print("Hi6")
+    t2 = datetime.now()
+
+    print(t2-t1)
+
+
 
 
 
