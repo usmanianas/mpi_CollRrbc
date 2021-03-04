@@ -274,17 +274,13 @@ def uJacobi(rho):
     global U
     global Nx, Ny, Nz, Nx, Ny, Nz
 
-    temp_sol = np.zeros_like(rho)
-
     jCnt = 0
     while True:
-        temp_sol[1:Nx-1, 1:Ny-1, bn:en] = ((hy2hz2*(U[0:Nx-2, 1:Ny-1, bn:en] + U[2:Nx, 1:Ny-1, bn:en]) +
-                                        hz2hx2*(U[1:Nx-1, 0:Ny-2, bn:en] + U[1:Nx-1, 2:Ny, bn:en]) +
-                                        hx2hy2*(U[1:Nx-1, 1:Ny-1, bn-1:en-1] + U[1:Nx-1, 1:Ny-1, bn+1:en+1]))*
-                                nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
-                            (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
-        
-        U[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        U[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
+                                       0.5*nu*dt*idx2*(U[0:Nx-2, 1:Ny-1, bn:en] + U[2:Nx, 1:Ny-1, bn:en]) +
+                                       0.5*nu*dt*idy2*(U[1:Nx-1, 0:Ny-2, bn:en] + U[1:Nx-1, 2:Ny, bn:en]) +
+                                       0.5*nu*dt*idz2*(U[1:Nx-1, 1:Ny-1, bn-1:en-1] + U[1:Nz-1, 1:Ny-1, bn+1:en+1]))          
 
         data_transfer(U)
 
@@ -320,18 +316,15 @@ def vJacobi(rho):
     global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
     global V
     global Nx, Ny, Nz, Nx, Ny, Nz
-    
-    temp_sol = np.zeros_like(rho)
-    
+        
     jCnt = 0
     while True:
-        temp_sol[1:Nx-1, 1:Ny-1, bn:en] = ((hy2hz2*(V[0:Nx-2, 1:Ny-1, bn:en] + V[2:Nx, 1:Ny-1, bn:en]) +
-                                    hz2hx2*(V[1:Nx-1, 0:Ny-2, bn:en] + V[1:Nx-1, 2:Ny, bn:en]) +
-                                    hx2hy2*(V[1:Nx-1, 1:Ny-1, bn-1:en-1] + V[1:Nx-1, 1:Ny-1, bn+1:en+1]))*
-                                nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
-                        (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
-    
-        V[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        V[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
+                                       0.5*nu*dt*idx2*(V[0:Nx-2, 1:Ny-1, bn:en] + V[2:Nx, 1:Ny-1, bn:en]) +
+                                       0.5*nu*dt*idy2*(V[1:Nx-1, 0:Ny-2, bn:en] + V[1:Nx-1, 2:Ny, bn:en]) +
+                                       0.5*nu*dt*idz2*(V[1:Nx-1, 1:Ny-1, bn-1:en-1] + V[1:Nz-1, 1:Ny-1, bn+1:en+1]))  
+
 
         data_transfer(V)
 
@@ -344,6 +337,7 @@ def vJacobi(rho):
                         (V[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
+
 
         #if rank == 0:
         #    print(rank, locmaxErr)
@@ -368,18 +362,14 @@ def wJacobi(rho):
     global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
     global W
     global Nx, Ny, Nz, Nx, Ny, Nz
-    
-    temp_sol = np.zeros_like(rho)
-    
+        
     jCnt = 0
     while True:
-        temp_sol[1:Nx-1, 1:Ny-1, bn:en] = ((hy2hz2*(W[0:Nx-2, 1:Ny-1, bn:en] + W[2:Nx, 1:Ny-1, bn:en]) +
-                                    hz2hx2*(W[1:Nx-1, 0:Ny-2, bn:en] + W[1:Nx-1, 2:Ny, bn:en]) +
-                                    hx2hy2*(W[1:Nx-1, 1:Ny-1, bn-1:en-1] + W[1:Nx-1, 1:Ny-1, bn+1:en+1]))*
-                                nu*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
-                        (1.0 + nu*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
-        
-        W[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        W[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
+                                       0.5*nu*dt*idx2*(W[0:Nx-2, 1:Ny-1, bn:en] + W[2:Nx, 1:Ny-1, bn:en]) +
+                                       0.5*nu*dt*idy2*(W[1:Nx-1, 0:Ny-2, bn:en] + W[1:Nx-1, 2:Ny, bn:en]) +
+                                       0.5*nu*dt*idz2*(W[1:Nx-1, 1:Ny-1, bn-1:en-1] + W[1:Nz-1, 1:Ny-1, bn+1:en+1]))         
 
         data_transfer(W)
     
@@ -417,18 +407,14 @@ def TJacobi(rho):
     global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
     global T
     global Nx, Ny, Nz, Nx, Ny, Nz
-    
-    temp_sol = np.zeros_like(rho)
-    
+        
     jCnt = 0
     while True:
-        temp_sol[1:Nx-1, 1:Ny-1, bn:en] = ((hy2hz2*(T[0:Nx-2, 1:Ny-1, bn:en] + T[2:Nx, 1:Ny-1, bn:en]) +
-                                    hz2hx2*(T[1:Nx-1, 0:Ny-2, bn:en] + T[1:Nx-1, 2:Ny, bn:en]) +
-                                    hx2hy2*(T[1:Nx-1, 1:Ny-1, bn-1:en-1] + T[1:Nx-1, 1:Ny-1, bn+1:en+1]))*
-                                kappa*dt/(hx2hy2hz2*2.0) + rho[1:Nx-1, 1:Ny-1, bn:en])/ \
-                        (1.0 + kappa*dt*(hy2hz2 + hz2hx2 + hx2hy2)/(hx2hy2hz2))
-    
-        T[1:Nx-1, 1:Ny-1, bn:en] = temp_sol[1:Nx-1, 1:Ny-1, bn:en]
+
+        T[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+kappa*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
+                                       0.5*kappa*dt*idx2*(T[0:Nx-2, 1:Ny-1, bn:en] + T[2:Nx, 1:Ny-1, bn:en]) +
+                                       0.5*kappa*dt*idy2*(T[1:Nx-1, 0:Ny-2, bn:en] + T[1:Nx-1, 2:Ny, bn:en]) +
+                                       0.5*kappa*dt*idz2*(T[1:Nx-1, 1:Ny-1, bn-1:en-1] + T[1:Nz-1, 1:Ny-1, bn+1:en+1])) 
 
         data_transfer(T)
 
