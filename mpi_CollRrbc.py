@@ -154,9 +154,9 @@ def getDiv(U, V, W):
 
     divMat = np.zeros([Nx, Ny, Nz])
 
-    divMat[1:Nx-1, 1:Ny-1, bn:en] = ((U[2:Nx, 1:Ny-1, bn:en] - U[0:Nx-2, 1:Ny-1, bn:en])*0.5/hx +
-                                (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])*0.5/hy +
-                                (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])*0.5/hz)
+    divMat[bn:en, 1:Ny-1, 1:Nz-1] = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])*0.5/hx +
+                                (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])*0.5/hy +
+                                (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])*0.5/hz)
     
     locdivMax = np.max(abs(divMat))
 
@@ -170,45 +170,45 @@ def getDiv(U, V, W):
 
 
 def data_transfer(F):
-    s1, s2 = np.zeros([Nx, Ny]), np.zeros([Nx, Ny])
-    r1, r2 = np.zeros([Nx, Ny]), np.zeros([Nx, Ny])
+    s1, s2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
+    r1, r2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
 
 
     if rank == 0:
 
-        s1 = F[:, :, en-1].copy()
+        s1 = F[en-1, :, :].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
 
         comm.Send(s1, dest = rank+1)
         comm.Recv(r1, source = rank+1)
-        F[:, :, en] = r1
+        F[en, :, :] = r1
 
     if rank > 0 and rank < nprocs-1:
 
-        s1 = F[:, :, en-1].copy()
-        s2 = F[:, :, bn].copy()
+        s1 = F[en-1, :, :].copy()
+        s2 = F[bn, :, :].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
 
         comm.Send(s1, dest = rank+1)
         comm.Recv(r1, source = rank+1)
-        F[:, :, en] = r1
+        F[en, :, :] = r1
 
         comm.Send(s2, dest = rank-1)
         comm.Recv(r2, source = rank-1)  
-        F[:, :, bn-1] = r2                                     
+        F[bn-1, :, :] = r2                                     
 
     if rank == nprocs-1:
 
-        s1 = F[:, :, bn].copy()
+        s1 = F[bn, :, :].copy()
 
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
 
         comm.Send(s1, dest = rank-1)
         comm.Recv(r1, source = rank-1)
-        F[:, :, bn-1] = r1
+        F[bn-1, :, :] = r1
 
 
 
@@ -216,56 +216,56 @@ def computeNLinDiff_X(U, V, W):
     global Hx
     global Nz, Ny, Nx, Nx, Ny, Nz
 
-    Hx[1:Nx-1, 1:Ny-1, bn:en] = (((U[2:Nx, 1:Ny-1, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[0:Nx-2, 1:Ny-1, bn:en])/hx2 + 
-                                (U[1:Nx-1, 2:Ny, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 0:Ny-2, bn:en])/hy2 + 
-                                (U[1:Nx-1, 1:Ny-1, bn+1:en+1] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 1:Ny-1, bn-1:en-1])/hz2)*0.5*nu -
-                              U[1:Nx-1, 1:Ny-1, bn:en]*(U[2:Nx, 1:Ny-1, bn:en] - U[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx) -
-                              V[1:Nx-1, 1:Ny-1, bn:en]*(U[1:Nx-1, 2:Ny, bn:en] - U[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
-                              W[1:Nx-1, 1:Ny-1, bn:en]*(U[1:Nx-1, 1:Ny-1, bn+1:en+1] - U[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
+    Hx[bn:en, 1:Ny-1, 1:Nz-1] = (((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
+                                (U[bn:en, 2:Ny, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
+                                (U[bn:en, 1:Ny-1, 2:Nz] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
+                              U[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
+                              V[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn:en, 2:Ny, 1:Nz-1] - U[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
+                              W[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn:en, 1:Ny-1, 2:Nz] - U[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
 
-    return Hx[1:Nx-1, 1:Ny-1, bn:en]
+    return Hx[bn:en, 1:Ny-1, 1:Nz-1]
 
 def computeNLinDiff_Y(U, V, W):
     global Hy
     global Nz, Ny, Nx, Nx, Ny, Nz
 
-    Hy[1:Nx-1, 1:Ny-1, bn:en] = (((V[2:Nx, 1:Ny-1, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[0:Nx-2, 1:Ny-1, bn:en])/hx2 + 
-                                (V[1:Nx-1, 2:Ny, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 0:Ny-2, bn:en])/hy2 + 
-                                (V[1:Nx-1, 1:Ny-1, bn+1:en+1] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 1:Ny-1, bn-1:en-1])/hz2)*0.5*nu -
-                              U[1:Nx-1, 1:Ny-1, bn:en]*(V[2:Nx, 1:Ny-1, bn:en] - V[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx) -
-                              V[1:Nx-1, 1:Ny-1, bn:en]*(V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
-                              W[1:Nx-1, 1:Ny-1, bn:en]*(V[1:Nx-1, 1:Ny-1, bn+1:en+1] - V[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
+    Hy[bn:en, 1:Ny-1, 1:Nz-1] = (((V[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
+                                (V[bn:en, 2:Ny, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
+                                (V[bn:en, 1:Ny-1, 2:Nz] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
+                              U[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn+1:en+1, 1:Ny-1, 1:Nz-1] - V[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
+                              V[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
+                              W[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn:en, 1:Ny-1, 2:Nz] - V[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
 
-    return Hy[1:Nx-1, 1:Ny-1, bn:en]
+    return Hy[bn:en, 1:Ny-1, 1:Nz-1]
 
 
 def computeNLinDiff_Z(U, V, W):
     global Hz
     global Nz, Ny, Nx, Nx, Ny, Nz
 
-    Hz[1:Nx-1, 1:Ny-1, bn:en] = (((W[2:Nx, 1:Ny-1, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[0:Nx-2, 1:Ny-1, bn:en])/hx2 + 
-                                (W[1:Nx-1, 2:Ny, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 0:Ny-2, bn:en])/hy2 + 
-                                (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 1:Ny-1, bn-1:en-1])/hz2)*0.5*nu -
-                              U[1:Nx-1, 1:Ny-1, bn:en]*(W[2:Nx, 1:Ny-1, bn:en] - W[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx) -
-                              V[1:Nx-1, 1:Ny-1, bn:en]*(W[1:Nx-1, 2:Ny, bn:en] - W[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
-                              W[1:Nx-1, 1:Ny-1, bn:en]*(W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
+    Hz[bn:en, 1:Ny-1, 1:Nz-1] = (((W[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
+                                (W[bn:en, 2:Ny, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
+                                (W[bn:en, 1:Ny-1, 2:Nz] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
+                              U[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn+1:en+1, 1:Ny-1, 1:Nz-1] - W[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
+                              V[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn:en, 2:Ny, 1:Nz-1] - W[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
+                              W[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
 
 
-    return Hz[1:Nx-1, 1:Ny-1, bn:en]
+    return Hz[bn:en, 1:Ny-1, 1:Nz-1]
 
 
 def computeNLinDiff_T(U, V, W, T):
     global Ht
     global Nz, Ny, Nx
 
-    Ht[1:Nx-1, 1:Ny-1, bn:en] = (((T[2:Nx, 1:Ny-1, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[0:Nx-2, 1:Ny-1, bn:en])/hx2 + 
-                                (T[1:Nx-1, 2:Ny, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 0:Ny-2, bn:en])/hy2 + 
-                                (T[1:Nx-1, 1:Ny-1, bn+1:en+1] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 1:Ny-1, bn-1:en-1])/hz2)*0.5*kappa -
-                              U[1:Nx-1, 1:Ny-1, bn:en]*(T[2:Nx, 1:Ny-1, bn:en] - T[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx)-
-                              V[1:Nx-1, 1:Ny-1, bn:en]*(T[1:Nx-1, 2:Ny, bn:en] - T[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) - 
-                              W[1:Nx-1, 1:Ny-1, bn:en]*(T[1:Nx-1, 1:Ny-1, bn+1:en+1] - T[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))
+    Ht[bn:en, 1:Ny-1, 1:Nz-1] = (((T[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
+                                (T[bn:en, 2:Ny, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
+                                (T[bn:en, 1:Ny-1, 2:Nz] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*kappa -
+                              U[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn+1:en+1, 1:Ny-1, 1:Nz-1] - T[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx)-
+                              V[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn:en, 2:Ny, 1:Nz-1] - T[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
+                              W[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn:en, 1:Ny-1, 2:Nz] - T[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
 
-    return Ht[1:Nx-1, 1:Ny-1, bn:en]
+    return Ht[bn:en, 1:Ny-1, 1:Nz-1]
 
 
 #Jacobi iterative solver for U
@@ -277,19 +277,19 @@ def uJacobi(rho):
     jCnt = 0
     while True:
 
-        U[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
-                                       0.5*nu*dt*idx2*(U[0:Nx-2, 1:Ny-1, bn:en] + U[2:Nx, 1:Ny-1, bn:en]) +
-                                       0.5*nu*dt*idy2*(U[1:Nx-1, 0:Ny-2, bn:en] + U[1:Nx-1, 2:Ny, bn:en]) +
-                                       0.5*nu*dt*idz2*(U[1:Nx-1, 1:Ny-1, bn-1:en-1] + U[1:Nz-1, 1:Ny-1, bn+1:en+1]))          
+        U[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
+                                       0.5*nu*dt*idx2*(U[bn-1:en-1, 1:Ny-1, 1:Nz-1] + U[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
+                                       0.5*nu*dt*idy2*(U[bn:en, 0:Ny-2, 1:Nz-1] + U[bn:en, 2:Ny, 1:Nz-1]) +
+                                       0.5*nu*dt*idz2*(U[bn:en, 1:Ny-1, 0:Nz-2] + U[bn:en, 1:Ny-1, 2:Nz]))          
 
         data_transfer(U)
 
         imposeUBCs(U)
         
-        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (U[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
-                            (U[0:Nx-2, 1:Ny-1, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[2:Nx, 1:Ny-1, bn:en])/hx2 +
-                            (U[1:Nx-1, 0:Ny-2, bn:en] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 2:Ny, bn:en])/hy2 +
-                            (U[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*U[1:Nx-1, 1:Ny-1, bn:en] + U[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (U[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
+                            (U[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
+                            (U[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 2:Ny, 1:Nz-1])/hy2 +
+                            (U[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 1:Ny-1, 2:Nz])/hz2))))
         
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
@@ -308,7 +308,7 @@ def uJacobi(rho):
                 #print("Maximum error: ", totmaxErr)
                 quit()
 
-    return U[1:Nx-1, 1:Ny-1, bn:en]        
+    return U[bn:en, 1:Ny-1, 1:Nz-1]        
 
 
 #Jacobi iterative solver for V
@@ -320,10 +320,10 @@ def vJacobi(rho):
     jCnt = 0
     while True:
 
-        V[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
-                                       0.5*nu*dt*idx2*(V[0:Nx-2, 1:Ny-1, bn:en] + V[2:Nx, 1:Ny-1, bn:en]) +
-                                       0.5*nu*dt*idy2*(V[1:Nx-1, 0:Ny-2, bn:en] + V[1:Nx-1, 2:Ny, bn:en]) +
-                                       0.5*nu*dt*idz2*(V[1:Nx-1, 1:Ny-1, bn-1:en-1] + V[1:Nz-1, 1:Ny-1, bn+1:en+1]))  
+        V[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
+                                       0.5*nu*dt*idx2*(V[bn-1:en-1, 1:Ny-1, 1:Nz-1] + V[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
+                                       0.5*nu*dt*idy2*(V[bn:en, 0:Ny-2, 1:Nz-1] + V[bn:en, 2:Ny, 1:Nz-1]) +
+                                       0.5*nu*dt*idz2*(V[bn:en, 1:Ny-1, 0:Nz-2] + V[bn:en, 1:Ny-1, 2:Nz]))  
 
 
         data_transfer(V)
@@ -331,10 +331,10 @@ def vJacobi(rho):
         imposeVBCs(V)
 
 
-        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (V[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
-                        (V[0:Nx-2, 1:Ny-1, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[2:Nx, 1:Ny-1, bn:en])/hx2 +
-                        (V[1:Nx-1, 0:Ny-2, bn:en] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 2:Ny, bn:en])/hy2 +
-                        (V[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*V[1:Nx-1, 1:Ny-1, bn:en] + V[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (V[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
+                        (V[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
+                        (V[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 2:Ny, 1:Nz-1])/hy2 +
+                        (V[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 1:Ny-1, 2:Nz])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -354,7 +354,7 @@ def vJacobi(rho):
             #print("Maximum error: ", totmaxErr)
             quit()
     
-    return V[1:Nx-1, 1:Ny-1, bn:en]
+    return V[bn:en, 1:Ny-1, 1:Nz-1]
 
 
 #Jacobi iterative solver for W
@@ -366,20 +366,20 @@ def wJacobi(rho):
     jCnt = 0
     while True:
 
-        W[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
-                                       0.5*nu*dt*idx2*(W[0:Nx-2, 1:Ny-1, bn:en] + W[2:Nx, 1:Ny-1, bn:en]) +
-                                       0.5*nu*dt*idy2*(W[1:Nx-1, 0:Ny-2, bn:en] + W[1:Nx-1, 2:Ny, bn:en]) +
-                                       0.5*nu*dt*idz2*(W[1:Nx-1, 1:Ny-1, bn-1:en-1] + W[1:Nz-1, 1:Ny-1, bn+1:en+1]))         
+        W[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
+                                       0.5*nu*dt*idx2*(W[bn-1:en-1, 1:Ny-1, 1:Nz-1] + W[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
+                                       0.5*nu*dt*idy2*(W[bn:en, 0:Ny-2, 1:Nz-1] + W[bn:en, 2:Ny, 1:Nz-1]) +
+                                       0.5*nu*dt*idz2*(W[bn:en, 1:Ny-1, 0:Nz-2] + W[bn:en, 1:Ny-1, 2:Nz]))         
 
         data_transfer(W)
     
         imposeWBCs(W)
 
 
-        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (W[1:Nx-1, 1:Ny-1, bn:en] - 0.5*nu*dt*(
-                        (W[0:Nx-2, 1:Ny-1, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[2:Nx, 1:Ny-1, bn:en])/hx2 +
-                        (W[1:Nx-1, 0:Ny-2, bn:en] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 2:Ny, bn:en])/hy2 +
-                        (W[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*W[1:Nx-1, 1:Ny-1, bn:en] + W[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (W[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
+                        (W[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
+                        (W[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 2:Ny, 1:Nz-1])/hy2 +
+                        (W[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 1:Ny-1, 2:Nz])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -399,7 +399,7 @@ def wJacobi(rho):
             #print("Maximum error: ", totmaxErr)
             quit()
     
-    return W[1:Nx-1, 1:Ny-1, bn:en]       
+    return W[bn:en, 1:Ny-1, 1:Nz-1]       
 
 
 #Jacobi iterative solver for T
@@ -411,19 +411,19 @@ def TJacobi(rho):
     jCnt = 0
     while True:
 
-        T[1:Nx-1, 1:Ny-1, bn:en] =(1.0/(1+kappa*dt*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] + 
-                                       0.5*kappa*dt*idx2*(T[0:Nx-2, 1:Ny-1, bn:en] + T[2:Nx, 1:Ny-1, bn:en]) +
-                                       0.5*kappa*dt*idy2*(T[1:Nx-1, 0:Ny-2, bn:en] + T[1:Nx-1, 2:Ny, bn:en]) +
-                                       0.5*kappa*dt*idz2*(T[1:Nx-1, 1:Ny-1, bn-1:en-1] + T[1:Nz-1, 1:Ny-1, bn+1:en+1])) 
+        T[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+kappa*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
+                                       0.5*kappa*dt*idx2*(T[bn-1:en-1, 1:Ny-1, 1:Nz-1] + T[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
+                                       0.5*kappa*dt*idy2*(T[bn:en, 0:Ny-2, 1:Nz-1] + T[bn:en, 2:Ny, 1:Nz-1]) +
+                                       0.5*kappa*dt*idz2*(T[bn:en, 1:Ny-1, 0:Nz-2] + T[bn:en, 1:Ny-1, 2:Nz])) 
 
-        data_transfer(T)
+        #data_transfer(T)
 
         imposeTBCs(T)
 
-        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] - (T[1:Nx-1, 1:Ny-1, bn:en] - 0.5*kappa*dt*(
-                        (T[0:Nx-2, 1:Ny-1, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[2:Nx, 1:Ny-1, bn:en])/hx2 +
-                        (T[1:Nx-1, 0:Ny-2, bn:en] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 2:Ny, bn:en])/hy2 +
-                        (T[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*T[1:Nx-1, 1:Ny-1, bn:en] + T[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (T[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*kappa*dt*(
+                        (T[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
+                        (T[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 2:Ny, 1:Nz-1])/hy2 +
+                        (T[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 1:Ny-1, 2:Nz])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -442,7 +442,7 @@ def TJacobi(rho):
             #print("Maximum error: ", totmaxErr)
             quit()
     
-    return T[1:Nx-1, 1:Ny-1, bn:en]       
+    return T[bn:en, 1:Ny-1, 1:Nz-1]       
 
 
 
@@ -469,18 +469,18 @@ def PoissonSolver(rho):
                                        idy2*(Pp[i, j+1, k] + Pp[i, j-1, k]) -
                                        idz2*(Pp[i, j, k+1] + Pp[i, j, k-1]))
 
-        Pp[1:Nx-1, 1:Ny-1, bn:en] = (1.0-gssor)*Ppp[1:Nx-1, 1:Ny-1, bn:en] + gssor * Pp[1:Nx-1, 1:Ny-1, bn:en]            
+        Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0-gssor)*Ppp[bn:en, 1:Ny-1, 1:Nz-1] + gssor * Pp[bn:en, 1:Ny-1, 1:Nz-1]            
         '''
     
            
         
-        Pp[1:Nx-1, 1:Ny-1, bn:en] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[1:Nx-1, 1:Ny-1, bn:en] - 
-                                       idx2*(Pp[0:Nx-2, 1:Ny-1, bn:en] + Pp[2:Nx, 1:Ny-1, bn:en]) -
-                                       idy2*(Pp[1:Nx-1, 0:Ny-2, bn:en] + Pp[1:Nx-1, 2:Ny, bn:en]) -
-                                       idz2*(Pp[1:Nx-1, 1:Ny-1, bn-1:en-1] + Pp[1:Nx-1, 1:Ny-1, bn+1:en+1]))   
+        Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] - 
+                                       idx2*(Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1]) -
+                                       idy2*(Pp[bn:en, 0:Ny-2, 1:Nz-1] + Pp[bn:en, 2:Ny, 1:Nz-1]) -
+                                       idz2*(Pp[bn:en, 1:Ny-1, 0:Nz-2] + Pp[bn:en, 1:Ny-1, 2:Nz]))   
 
 
-        #Pp[1:Nx-1, 1:Ny-1, bn:en] = (1.0-gssor)*Ppp[1:Nx-1, 1:Ny-1, bn:en] + gssor*Pp[1:Nx-1, 1:Ny-1, bn:en]                                                                   
+        #Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0-gssor)*Ppp[bn:en, 1:Ny-1, 1:Nz-1] + gssor*Pp[bn:en, 1:Ny-1, 1:Nz-1]                                                                   
            
         #Ppp = Pp.copy()
 
@@ -491,10 +491,10 @@ def PoissonSolver(rho):
 
         #locmaxErr, totmaxErr = np.zeros(1), np.zeros(1)
     
-        locmaxErr = np.amax(np.fabs(rho[1:Nx-1, 1:Ny-1, bn:en] -((
-                        (Pp[0:Nx-2, 1:Ny-1, bn:en] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[2:Nx, 1:Ny-1, bn:en])/hx2 +
-                        (Pp[1:Nx-1, 0:Ny-2, bn:en] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 2:Ny, bn:en])/hy2 +
-                        (Pp[1:Nx-1, 1:Ny-1, bn-1:en-1] - 2.0*Pp[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn+1:en+1])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] -((
+                        (Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
+                        (Pp[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 2:Ny, 1:Nz-1])/hy2 +
+                        (Pp[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 1:Ny-1, 2:Nz])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -519,7 +519,7 @@ def PoissonSolver(rho):
             print("ERROR: Poisson solver not converging. Aborting")
             quit()
     
-    return Pp[1:Nx-1, 1:Ny-1, bn:en]     
+    return Pp[bn:en, 1:Ny-1, 1:Nz-1]     
 
 
 
@@ -559,10 +559,10 @@ while True:
     if iCnt % opInt == 0:
 
         #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
-        locE = 0.5*np.sum(U[1:Nx-1, 1:Ny-1, bn:en]**2.0 + V[1:Nx-1, 1:Ny-1, bn:en]**2.0 + W[1:Nx-1, 1:Ny-1, bn:en]**2.0)
+        locE = 0.5*np.sum(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0)
         totalE = comm.reduce(locE, op=MPI.SUM, root=0)
        
-        locWT = np.sum(W[1:Nx-1, 1:Ny-1, bn:en]*T[1:Nx-1, 1:Ny-1, bn:en])
+        locWT = np.sum(W[bn:en, 1:Ny-1, 1:Nz-1]*T[bn:en, 1:Ny-1, 1:Nz-1])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
@@ -573,39 +573,39 @@ while True:
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
 
-    Hx[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_X(U, V, W)
-    Hy[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_Y(U, V, W)
-    Hz[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_Z(U, V, W)
-    Ht[1:Nx-1, 1:Ny-1, bn:en] = computeNLinDiff_T(U, V, W, T)  
+    Hx[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_X(U, V, W)
+    Hy[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_Y(U, V, W)
+    Hz[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_Z(U, V, W)
+    Ht[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_T(U, V, W, T)  
 
-    Hx[1:Nx-1, 1:Ny-1, bn:en] = U[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hx[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(-V[1:Nx-1, 1:Ny-1, bn:en]) - (P[2:Nx, 1:Ny-1, bn:en] - P[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx))
+    Hx[bn:en, 1:Ny-1, 1:Nz-1] = U[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hx[bn:en, 1:Ny-1, 1:Nz-1] - np.sqrt((Ta*Pr)/Ra)*(-V[bn:en, 1:Ny-1, 1:Nz-1]) - (P[bn+1:en+1, 1:Ny-1, 1:Nz-1] - P[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx))
     uJacobi(Hx)
 
-    Hy[1:Nx-1, 1:Ny-1, bn:en] = V[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hy[1:Nx-1, 1:Ny-1, bn:en] - np.sqrt((Ta*Pr)/Ra)*(U[1:Nx-1, 1:Ny-1, bn:en]) - (P[1:Nx-1, 2:Ny, bn:en] - P[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy))
+    Hy[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hy[bn:en, 1:Ny-1, 1:Nz-1] - np.sqrt((Ta*Pr)/Ra)*(U[bn:en, 1:Ny-1, 1:Nz-1]) - (P[bn:en, 2:Ny, 1:Nz-1] - P[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy))
     vJacobi(Hy)
 
-    Hz[1:Nx-1, 1:Ny-1, bn:en] = W[1:Nx-1, 1:Ny-1, bn:en] + dt*(Hz[1:Nx-1, 1:Ny-1, bn:en] - ((P[1:Nx-1, 1:Ny-1, bn+1:en+1] - P[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz)) + T[1:Nx-1, 1:Ny-1, bn:en])
+    Hz[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hz[bn:en, 1:Ny-1, 1:Nz-1] - ((P[bn:en, 1:Ny-1, 2:Nz] - P[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)) + T[bn:en, 1:Ny-1, 1:Nz-1])
     wJacobi(Hz)
 
-    Ht[1:Nx-1, 1:Ny-1, bn:en] = T[1:Nx-1, 1:Ny-1, bn:en] + dt*Ht[1:Nx-1, 1:Ny-1, bn:en]
+    Ht[bn:en, 1:Ny-1, 1:Nz-1] = T[bn:en, 1:Ny-1, 1:Nz-1] + dt*Ht[bn:en, 1:Ny-1, 1:Nz-1]
     TJacobi(Ht)   
 
     rhs = np.zeros([Nx, Ny, Nz])
 
-    rhs[1:Nx-1, 1:Ny-1, bn:en] = ((U[2:Nx, 1:Ny-1, bn:en] - U[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx) +
-                                (V[1:Nx-1, 2:Ny, bn:en] - V[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy) +
-                                (W[1:Nx-1, 1:Ny-1, bn+1:en+1] - W[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz))/dt
+    rhs[bn:en, 1:Ny-1, 1:Nz-1] = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) +
+                                (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) +
+                                (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))/dt
 
     tp1 = datetime.now()
-    Pp[1:Nx-1, 1:Ny-1, bn:en] = PoissonSolver(rhs)
+    Pp[bn:en, 1:Ny-1, 1:Nz-1] = PoissonSolver(rhs)
     tp2 = datetime.now()
     #print(tp2-tp1)
 
-    P[1:Nx-1, 1:Ny-1, bn:en] = P[1:Nx-1, 1:Ny-1, bn:en] + Pp[1:Nx-1, 1:Ny-1, bn:en]
+    P[bn:en, 1:Ny-1, 1:Nz-1] = P[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 1:Ny-1, 1:Nz-1]
 
-    U[1:Nx-1, 1:Ny-1, bn:en] = U[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[2:Nx, 1:Ny-1, bn:en] - Pp[0:Nx-2, 1:Ny-1, bn:en])/(2.0*hx)
-    V[1:Nx-1, 1:Ny-1, bn:en] = V[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[1:Nx-1, 2:Ny, bn:en] - Pp[1:Nx-1, 0:Ny-2, bn:en])/(2.0*hy)
-    W[1:Nx-1, 1:Ny-1, bn:en] = W[1:Nx-1, 1:Ny-1, bn:en] - dt*(Pp[1:Nx-1, 1:Ny-1, bn+1:en+1] - Pp[1:Nx-1, 1:Ny-1, bn-1:en-1])/(2.0*hz)
+    U[bn:en, 1:Ny-1, 1:Nz-1] = U[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1] - Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx)
+    V[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 2:Ny, 1:Nz-1] - Pp[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy)
+    W[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 1:Ny-1, 2:Nz] - Pp[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)
 
     data_transfer(U)
     data_transfer(V)
