@@ -52,7 +52,7 @@ if rank == 0:
 #if rank == nprocs-1:
 #    en = en-1    
 '''
-#print(rank, bn, en)
+print('#',rank, bn, en)
 
 
 
@@ -100,9 +100,14 @@ maxCount = 1e4
 #################################################
 
 
-
 P = np.ones([Nx, Ny, Nz])
-
+'''
+P = np.ones([Nx//nprocs, Ny, Nz])    
+comm.Scatter(data, P, root=0)
+P[bn:en, :, :] = 1.0
+print(P.shape)
+print(rank, bn, en, P[bn:en, 10, 10])
+'''
 T = np.zeros([Nx, Ny, Nz])
 
 T[:, :, 0:Nz] = 1 - z[0:Nz]
@@ -113,7 +118,11 @@ V = np.zeros([Nx, Ny, Nz])
 
 W = np.zeros([Nx, Ny, Nz])
 
-#print(P.dtype)
+divMat = np.zeros([Nx, Ny, Nz])
+
+Pp = np.zeros([Nx, Ny, Nz])
+
+#print(P.shape)
 
 
 Hx = np.zeros_like(U)
@@ -152,8 +161,6 @@ def writeSoln(U, V, W, P, T, time):
 
 def getDiv(U, V, W):
 
-    divMat = np.zeros([Nx, Ny, Nz])
-
     divMat[bn:en, 1:Ny-1, 1:Nz-1] = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])*0.5/hx +
                                 (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])*0.5/hy +
                                 (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])*0.5/hz)
@@ -176,39 +183,40 @@ def data_transfer(F):
 
     if rank == 0:
 
-        s1 = F[en-1, :, :].copy()
+        #s1 = F[en-1, :, :].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
 
-        comm.Send(s1, dest = rank+1)
-        comm.Recv(r1, source = rank+1)
-        F[en, :, :] = r1
+        comm.Send(F[en-1, :, :], dest = rank+1)
+        comm.Recv(F[en, :, :], source = rank+1)
+
+        #F[en, :, :] = r1
 
     if rank > 0 and rank < nprocs-1:
 
-        s1 = F[en-1, :, :].copy()
-        s2 = F[bn, :, :].copy()
+        #s1 = F[en-1, :, :].copy()
+        #s2 = F[bn, :, :].copy()
 
         #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
 
-        comm.Send(s1, dest = rank+1)
-        comm.Recv(r1, source = rank+1)
-        F[en, :, :] = r1
+        comm.Send(F[en-1, :, :], dest = rank+1)
+        comm.Recv(F[en, :, :], source = rank+1)
+        #F[en, :, :] = r1
 
-        comm.Send(s2, dest = rank-1)
-        comm.Recv(r2, source = rank-1)  
-        F[bn-1, :, :] = r2                                     
+        comm.Send(F[bn, :, :], dest = rank-1)
+        comm.Recv(F[bn-1, :, :], source = rank-1)  
+        #F[bn-1, :, :] = r2                                     
 
     if rank == nprocs-1:
 
-        s1 = F[bn, :, :].copy()
+        #s1 = F[bn, :, :].copy()
 
         #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
 
-        comm.Send(s1, dest = rank-1)
-        comm.Recv(r1, source = rank-1)
-        F[bn-1, :, :] = r1
+        comm.Send(F[bn, :, :], dest = rank-1)
+        comm.Recv(F[bn-1, :, :], source = rank-1)
+        #F[bn-1, :, :] = r1
 
 
 
@@ -450,8 +458,6 @@ def PoissonSolver(rho):
     global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, PoissonTolerance, maxCount 
     global Nz, Ny, Nx    
     
-    
-    Pp = np.zeros([Nx, Ny, Nz])
     #Pp = np.random.rand(Nx, Ny, Nz)
     #Ppp = np.zeros([Nx, Ny, Nz])
         
@@ -485,9 +491,18 @@ def PoissonSolver(rho):
         #Ppp = Pp.copy()
 
         #imposePBCs(Pp)
-
+        #if (jCnt % 100 == 0):
+        #    if rank==2:
+                #print(Pp[bn-1,10,10]) 
+        #        print(Pp[en,10,10])          
 
         data_transfer(Pp)
+
+        #if (jCnt % 100 == 0):
+        #    if rank==2:
+            #print(U[en,10,10], V[en,10,10], W[en,10,10], T[en,10,10], P[en,10,10]) 
+        #        print(Pp[en,10,10])   
+
 
         #locmaxErr, totmaxErr = np.zeros(1), np.zeros(1)
     
@@ -498,7 +513,6 @@ def PoissonSolver(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-        #if rank == 0:
         #if (jCnt % 100 == 0):
             #print(rank, jCnt, totmaxErr)
 
@@ -507,7 +521,6 @@ def PoissonSolver(rho):
 
         #if rank == 0:
         if totmaxErr < PoissonTolerance:
-        #if jCnt > 500:
             #print(rank, totmaxErr)
             #print(jCnt)
             #print("Poisson solver converged")
@@ -559,8 +572,8 @@ while True:
     if iCnt % opInt == 0:
 
         #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
-        locE = 0.5*np.sum(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0)
-        totalE = comm.reduce(locE, op=MPI.SUM, root=0)
+        locU = np.mean(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
+        globU = comm.reduce(locU, op=MPI.SUM, root=0)
        
         locWT = np.sum(W[bn:en, 1:Ny-1, 1:Nz-1]*T[bn:en, 1:Ny-1, 1:Nz-1])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
@@ -568,7 +581,8 @@ while True:
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            Re = np.sqrt(2.0*totalE/((Nx-2)*(Ny-2)*(Nz-2)))/nu
+            globU = globU/nprocs
+            Re = globU/nu
             Nu = 1.0 + totalWT/(kappa*((Nx-2)*(Ny-2)*(Nz-2)))
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
@@ -607,11 +621,19 @@ while True:
     V[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 2:Ny, 1:Nz-1] - Pp[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy)
     W[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 1:Ny-1, 2:Nz] - Pp[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)
 
+    #if rank==3:
+    #   print(U[bn-1,10,10], V[bn-1,10,10], W[bn-1,10,10], T[bn-1,10,10], P[bn-1,10,10])            
+        #print(U[bn,10,10], V[bn,10,10], W[bn,10,10], T[bn,10,10], P[bn,10,10])
+
     data_transfer(U)
     data_transfer(V)
     data_transfer(W)
     data_transfer(T)
     data_transfer(P)
+
+    #if rank==3:
+        #print(U[en,10,10], V[en,10,10], W[en,10,10], T[en,10,10], P[en,10,10]) 
+    #   print(U[bn-1,10,10], V[bn-1,10,10], W[bn-1,10,10], T[bn-1,10,10], P[bn-1,10,10])   
 
     imposeUBCs(U)                               
     imposeVBCs(V)                               
@@ -619,6 +641,17 @@ while True:
     imposePBCs(P)                               
     imposeTBCs(T)       
 
+    '''
+    Umax, Vmax, Wmax, Tmax, Pmax = np.amax(abs(U)), np.amax(abs(V)), np.amax(abs(W)), np.amax(abs(T)), np.amax(abs(P))
+    tUmax = comm.reduce(Umax, op=MPI.MAX, root=0)
+    tVmax = comm.reduce(Vmax, op=MPI.MAX, root=0)
+    tWmax = comm.reduce(Wmax, op=MPI.MAX, root=0)
+    tTmax = comm.reduce(Tmax, op=MPI.MAX, root=0)
+    tPmax = comm.reduce(Pmax, op=MPI.MAX, root=0)
+    if rank==0:
+        print(tUmax, tVmax, tWmax, tTmax, tPmax)
+    
+    '''
     '''
     #if abs(fwTime - time) < 0.5*dt:
     if abs(time - tMax)<1e-5:
