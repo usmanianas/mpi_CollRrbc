@@ -12,7 +12,8 @@ import random
 #### Grid Parameters ###########################
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 32, 32, 32
+Nx = 20
+Ny, Nz = Nx, Nx
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
 
@@ -57,9 +58,9 @@ print('#',rank, bn, en)
 
 
 #### Flow Parameters #############
-Ra = 1.0e5
+Ra = 1.0e4
 
-Pr = 0.786
+Pr = 1
 
 Ta = 0.0e7
 
@@ -177,8 +178,8 @@ def getDiv(U, V, W):
 
 
 def data_transfer(F):
-    s1, s2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
-    r1, r2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
+    #s1, s2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
+    #r1, r2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
 
 
     if rank == 0:
@@ -221,8 +222,6 @@ def data_transfer(F):
 
 
 def computeNLinDiff_X(U, V, W):
-    global Hx
-    global Nz, Ny, Nx, Nx, Ny, Nz
 
     Hx[bn:en, 1:Ny-1, 1:Nz-1] = (((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
                                 (U[bn:en, 2:Ny, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
@@ -234,8 +233,6 @@ def computeNLinDiff_X(U, V, W):
     return Hx[bn:en, 1:Ny-1, 1:Nz-1]
 
 def computeNLinDiff_Y(U, V, W):
-    global Hy
-    global Nz, Ny, Nx, Nx, Ny, Nz
 
     Hy[bn:en, 1:Ny-1, 1:Nz-1] = (((V[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
                                 (V[bn:en, 2:Ny, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
@@ -278,9 +275,6 @@ def computeNLinDiff_T(U, V, W, T):
 
 #Jacobi iterative solver for U
 def uJacobi(rho):
-    global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount
-    global U
-    global Nx, Ny, Nz, Nx, Ny, Nz
 
     jCnt = 0
     while True:
@@ -321,9 +315,6 @@ def uJacobi(rho):
 
 #Jacobi iterative solver for V
 def vJacobi(rho):
-    global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
-    global V
-    global Nx, Ny, Nz, Nx, Ny, Nz
         
     jCnt = 0
     while True:
@@ -367,9 +358,6 @@ def vJacobi(rho):
 
 #Jacobi iterative solver for W
 def wJacobi(rho):
-    global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
-    global W
-    global Nx, Ny, Nz, Nx, Ny, Nz
         
     jCnt = 0
     while True:
@@ -412,9 +400,6 @@ def wJacobi(rho):
 
 #Jacobi iterative solver for T
 def TJacobi(rho):
-    global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, VpTolerance, maxCount  
-    global T
-    global Nx, Ny, Nz, Nx, Ny, Nz
         
     jCnt = 0
     while True:
@@ -455,12 +440,7 @@ def TJacobi(rho):
 
 
 def PoissonSolver(rho):
-    global hx2, hy2, hz2, hy2hz2, hz2hx2, hx2hy2, hx2hy2hz2, nu, dt, PoissonTolerance, maxCount 
-    global Nz, Ny, Nx    
-    
-    #Pp = np.random.rand(Nx, Ny, Nz)
-    #Ppp = np.zeros([Nx, Ny, Nz])
-        
+            
     jCnt = 0
     
     while True:
@@ -519,11 +499,8 @@ def PoissonSolver(rho):
 
         #print(rank, locmaxErr)
 
-        #if rank == 0:
         if totmaxErr < PoissonTolerance:
-            #print(rank, totmaxErr)
             #print(jCnt)
-            #print("Poisson solver converged")
             break
 
     
@@ -572,7 +549,7 @@ while True:
     if iCnt % opInt == 0:
 
         #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
-        locU = np.mean(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
+        locU = np.sum(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
         globU = comm.reduce(locU, op=MPI.SUM, root=0)
        
         locWT = np.sum(W[bn:en, 1:Ny-1, 1:Nz-1]*T[bn:en, 1:Ny-1, 1:Nz-1])
@@ -581,7 +558,7 @@ while True:
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            globU = globU/nprocs
+            globU = globU/((Nx-2)*(Ny-2)*(Nz-2))
             Re = globU/nu
             Nu = 1.0 + totalWT/(kappa*((Nx-2)*(Ny-2)*(Nz-2)))
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
