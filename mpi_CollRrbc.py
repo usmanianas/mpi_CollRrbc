@@ -23,15 +23,13 @@ z = np.linspace(0, 1, Nz, endpoint=True)
 
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
-hx2hy2, hy2hz2, hz2hx2 = hx2*hy2, hy2*hz2, hz2*hx2
-
-hx2hy2hz2 = hx2*hy2*hz2
-
 idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
+
+print('# Grid', Nx, Ny, Nz)
 #############################################################
 
 
-
+########## MPI Parallelization ###########
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
@@ -43,18 +41,10 @@ en = bn + locn
 if rank == nprocs-1:
     en = Nz-1
 
+print(rank, bn, en)
+print('#',nprocs)
 
-'''
-bn = int((Nz/nprocs)*rank)
-en = int(bn + (Nz/nprocs) - 1)
-
-if rank == 0:
-    bn = 1
-#if rank == nprocs-1:
-#    en = en-1    
-'''
-print('#',rank, bn, en)
-
+########################################
 
 
 #### Flow Parameters #############
@@ -64,17 +54,10 @@ Pr = 1
 
 Ta = 0.0e7
 
-#if rank == 0:
- #   print("#", "Ra=", Ra, "Pr=", Pr, "Ta=", Ta)
-
-#Ro = np.sqrt(Ra/(Ta*Pr))
-
 nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
-#print(nu, kappa)
-
+print('#', 'Ra=', Ra, 'Pr=', Pr)
 #########################################################
-
 
 
 
@@ -95,20 +78,17 @@ VpTolerance = 1.0e-5
 # Tolerance value in Poisson iterations
 PoissonTolerance = 1.0e-3
 
-gssor = 1.6
+gssor = 1.6  # omega for SOR
 
 maxCount = 1e4
+
+print('# Tolerance', VpTolerance, PoissonTolerance)
 #################################################
 
 
+############# Fields Initialization #########
 P = np.ones([Nx, Ny, Nz])
-'''
-P = np.ones([Nx//nprocs, Ny, Nz])    
-comm.Scatter(data, P, root=0)
-P[bn:en, :, :] = 1.0
-print(P.shape)
-print(rank, bn, en, P[bn:en, 10, 10])
-'''
+
 T = np.zeros([Nx, Ny, Nz])
 
 T[:, :, 0:Nz] = 1 - z[0:Nz]
@@ -123,8 +103,6 @@ divMat = np.zeros([Nx, Ny, Nz])
 
 Pp = np.zeros([Nx, Ny, Nz])
 
-#print(P.shape)
-
 
 Hx = np.zeros_like(U)
 Hy = np.zeros_like(V)
@@ -136,11 +114,12 @@ Hx.fill(0.0)
 Hy.fill(0.0)
 Hz.fill(0.0)
 Ht.fill(0.0)
+#################################
+
 
 time = 0
 fwTime = 0.0
 iCnt = 1
-
 
 def writeSoln(U, V, W, P, T, time):
 
@@ -156,9 +135,6 @@ def writeSoln(U, V, W, P, T, time):
 
     f.close()
 
-#writeSoln(U, V, W, P, T, time)
-
-
 
 def getDiv(U, V, W):
 
@@ -168,8 +144,6 @@ def getDiv(U, V, W):
     
     locdivMax = np.max(abs(divMat))
 
-    #print(locdivMax)
-
     totdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
 
     #return np.unravel_index(divNyat.argmax(), divMat.shape), np.mean(divMat)
@@ -178,46 +152,27 @@ def getDiv(U, V, W):
 
 
 def data_transfer(F):
-    #s1, s2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
-    #r1, r2 = np.zeros([Ny, Nz]), np.zeros([Ny, Nz])
+    if nprocs > 1:
 
+        if rank == 0:
 
-    if rank == 0:
+            #F[en, :, :] = comm.Sendrecv(F[en-1, :, :], dest = rank+1, source = rank+1)
 
-        #s1 = F[en-1, :, :].copy()
+            comm.Send(F[en-1, :, :], dest = rank+1)
+            comm.Recv(F[en, :, :], source = rank+1)
 
-        #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
+        if rank > 0 and rank < nprocs-1:
 
-        comm.Send(F[en-1, :, :], dest = rank+1)
-        comm.Recv(F[en, :, :], source = rank+1)
+            comm.Send(F[en-1, :, :], dest = rank+1)
+            comm.Recv(F[en, :, :], source = rank+1)
 
-        #F[en, :, :] = r1
+            comm.Send(F[bn, :, :], dest = rank-1)
+            comm.Recv(F[bn-1, :, :], source = rank-1)  
 
-    if rank > 0 and rank < nprocs-1:
+        if rank == nprocs-1:
 
-        #s1 = F[en-1, :, :].copy()
-        #s2 = F[bn, :, :].copy()
-
-        #F[:, :, en] = comm.sendrecv(F[:, :, en-1], dest = rank+1, source = rank+1)
-        #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)  
-
-        comm.Send(F[en-1, :, :], dest = rank+1)
-        comm.Recv(F[en, :, :], source = rank+1)
-        #F[en, :, :] = r1
-
-        comm.Send(F[bn, :, :], dest = rank-1)
-        comm.Recv(F[bn-1, :, :], source = rank-1)  
-        #F[bn-1, :, :] = r2                                     
-
-    if rank == nprocs-1:
-
-        #s1 = F[bn, :, :].copy()
-
-        #F[:, :, bn-1] = comm.sendrecv(F[:, :, bn], dest = rank-1, source = rank-1)    
-
-        comm.Send(F[bn, :, :], dest = rank-1)
-        comm.Recv(F[bn-1, :, :], source = rank-1)
-        #F[bn-1, :, :] = r1
+            comm.Send(F[bn, :, :], dest = rank-1)
+            comm.Recv(F[bn-1, :, :], source = rank-1)
 
 
 
@@ -231,6 +186,7 @@ def computeNLinDiff_X(U, V, W):
                               W[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn:en, 1:Ny-1, 2:Nz] - U[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
 
     return Hx[bn:en, 1:Ny-1, 1:Nz-1]
+
 
 def computeNLinDiff_Y(U, V, W):
 
@@ -273,7 +229,6 @@ def computeNLinDiff_T(U, V, W, T):
     return Ht[bn:en, 1:Ny-1, 1:Nz-1]
 
 
-#Jacobi iterative solver for U
 def uJacobi(rho):
 
     jCnt = 0
@@ -296,24 +251,18 @@ def uJacobi(rho):
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-
-        #if rank == 0:
         if totmaxErr < VpTolerance:
-        #if jCnt > 10:
-
             #print(jCnt)
             break
         
         jCnt += 1
         if jCnt > maxCount:
                 print("ERROR: Jacobi not converging in U. Aborting")
-                #print("Maximum error: ", totmaxErr)
                 quit()
 
     return U[bn:en, 1:Ny-1, 1:Nz-1]        
 
 
-#Jacobi iterative solver for V
 def vJacobi(rho):
         
     jCnt = 0
@@ -337,26 +286,18 @@ def vJacobi(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-
-        #if rank == 0:
-        #    print(rank, locmaxErr)
-
-        #if rank == 0:
         if totmaxErr < VpTolerance:
-        #if jCnt > 10:
             #print(jCnt)
             break
     
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in V. Aborting")
-            #print("Maximum error: ", totmaxErr)
             quit()
     
     return V[bn:en, 1:Ny-1, 1:Nz-1]
 
 
-#Jacobi iterative solver for W
 def wJacobi(rho):
         
     jCnt = 0
@@ -379,26 +320,19 @@ def wJacobi(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-        #if rank == 0:
-        #print(rank, locmaxErr)
-
-        #if rank == 0:
         if totmaxErr < VpTolerance:
             #print(jCnt)
-        #if jCnt > 10:
             break
 
 
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in W. Aborting")
-            #print("Maximum error: ", totmaxErr)
             quit()
     
     return W[bn:en, 1:Ny-1, 1:Nz-1]       
 
 
-#Jacobi iterative solver for T
 def TJacobi(rho):
         
     jCnt = 0
@@ -409,7 +343,7 @@ def TJacobi(rho):
                                        0.5*kappa*dt*idy2*(T[bn:en, 0:Ny-2, 1:Nz-1] + T[bn:en, 2:Ny, 1:Nz-1]) +
                                        0.5*kappa*dt*idz2*(T[bn:en, 1:Ny-1, 0:Nz-2] + T[bn:en, 1:Ny-1, 2:Nz])) 
 
-        #data_transfer(T)
+        data_transfer(T)
 
         imposeTBCs(T)
 
@@ -420,19 +354,13 @@ def TJacobi(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-
-        #print(rank, locmaxErr)
-
-        #if rank == 0:
         if totmaxErr < VpTolerance:
-        #if jCnt > 10:
             #print(jCnt)
             break
     
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in T. Aborting")
-            #print("Maximum error: ", totmaxErr)
             quit()
     
     return T[bn:en, 1:Ny-1, 1:Nz-1]       
@@ -444,47 +372,26 @@ def PoissonSolver(rho):
     jCnt = 0
     
     while True:
-
     
         '''
+        Ppp = Pp.copy()
         for i in range(1,Nx-1):
             for j in range(1,Ny-1):
                 for k in range(1,Nz-1):
-                    Pp[i,j,k] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[i, j, k] - 
+                    Pp[i,j,k] = (1.0-gssor)*Ppp[i,j,k] + (gssor/(-2.0*(idx2 + idy2 + idz2))) * (rho[i, j, k] - 
                                        idx2*(Pp[i+1, j, k] + Pp[i-1, j, k]) -
                                        idy2*(Pp[i, j+1, k] + Pp[i, j-1, k]) -
                                        idz2*(Pp[i, j, k+1] + Pp[i, j, k-1]))
-
-        Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0-gssor)*Ppp[bn:en, 1:Ny-1, 1:Nz-1] + gssor * Pp[bn:en, 1:Ny-1, 1:Nz-1]            
         '''
-    
-           
-        
+            
         Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] - 
                                        idx2*(Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1]) -
                                        idy2*(Pp[bn:en, 0:Ny-2, 1:Nz-1] + Pp[bn:en, 2:Ny, 1:Nz-1]) -
                                        idz2*(Pp[bn:en, 1:Ny-1, 0:Nz-2] + Pp[bn:en, 1:Ny-1, 2:Nz]))   
 
-
-        #Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0-gssor)*Ppp[bn:en, 1:Ny-1, 1:Nz-1] + gssor*Pp[bn:en, 1:Ny-1, 1:Nz-1]                                                                   
-           
-        #Ppp = Pp.copy()
-
-        #imposePBCs(Pp)
-        #if (jCnt % 100 == 0):
-        #    if rank==2:
-                #print(Pp[bn-1,10,10]) 
-        #        print(Pp[en,10,10])          
-
         data_transfer(Pp)
 
-        #if (jCnt % 100 == 0):
-        #    if rank==2:
-            #print(U[en,10,10], V[en,10,10], W[en,10,10], T[en,10,10], P[en,10,10]) 
-        #        print(Pp[en,10,10])   
-
-
-        #locmaxErr, totmaxErr = np.zeros(1), np.zeros(1)
+        #imposePBCs(Pp)
     
         locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] -((
                         (Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
@@ -493,16 +400,9 @@ def PoissonSolver(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
-        #if (jCnt % 100 == 0):
-            #print(rank, jCnt, totmaxErr)
-
-
-        #print(rank, locmaxErr)
-
         if totmaxErr < PoissonTolerance:
             #print(jCnt)
             break
-
     
         jCnt += 1
         if jCnt > maxCount:
@@ -542,13 +442,10 @@ def imposePBCs(P):
 
 while True:
 
-    #print(rank, bn, en)
-
     t1 = datetime.now()
 
     if iCnt % opInt == 0:
 
-        #locE, locWT, totalE, totalWT = 0, 0, 0, 0 
         locU = np.sum(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
         globU = comm.reduce(locU, op=MPI.SUM, root=0)
        
@@ -598,19 +495,11 @@ while True:
     V[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 2:Ny, 1:Nz-1] - Pp[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy)
     W[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 1:Ny-1, 2:Nz] - Pp[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)
 
-    #if rank==3:
-    #   print(U[bn-1,10,10], V[bn-1,10,10], W[bn-1,10,10], T[bn-1,10,10], P[bn-1,10,10])            
-        #print(U[bn,10,10], V[bn,10,10], W[bn,10,10], T[bn,10,10], P[bn,10,10])
-
     data_transfer(U)
     data_transfer(V)
     data_transfer(W)
     data_transfer(T)
     data_transfer(P)
-
-    #if rank==3:
-        #print(U[en,10,10], V[en,10,10], W[en,10,10], T[en,10,10], P[en,10,10]) 
-    #   print(U[bn-1,10,10], V[bn-1,10,10], W[bn-1,10,10], T[bn-1,10,10], P[bn-1,10,10])   
 
     imposeUBCs(U)                               
     imposeVBCs(V)                               
@@ -618,6 +507,7 @@ while True:
     imposePBCs(P)                               
     imposeTBCs(T)       
 
+ 
     '''
     Umax, Vmax, Wmax, Tmax, Pmax = np.amax(abs(U)), np.amax(abs(V)), np.amax(abs(W)), np.amax(abs(T)), np.amax(abs(P))
     tUmax = comm.reduce(Umax, op=MPI.MAX, root=0)
