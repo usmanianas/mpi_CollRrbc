@@ -7,12 +7,12 @@ from mpi4py import MPI
 import time
 from datetime import datetime
 import random 
-
+import scipy.integrate as integrate
 
 #### Grid Parameters ###########################
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx = 20
+Nx = 40
 Ny, Nz = Nx, Nx
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
@@ -25,65 +25,8 @@ hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
 idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
 
-print('# Grid', Nx, Ny, Nz)
 #############################################################
 
-
-########## MPI Parallelization ###########
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-nprocs = comm.Get_size()
-
-locn = int(Nz/nprocs)
-bn = 1 + locn*rank
-en = bn + locn 
-
-if rank == nprocs-1:
-    en = Nz-1
-
-print(rank, bn, en)
-print('#',nprocs)
-
-########################################
-
-
-#### Flow Parameters #############
-Ra = 1.0e4
-
-Pr = 1
-
-Ta = 0.0e7
-
-nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
-
-print('#', 'Ra=', Ra, 'Pr=', Pr)
-#########################################################
-
-
-
-#########Simulation Parameters #########################
-dt = 0.01
-
-tMax = 1000
-
-# Number of iterations after which output must be printed to standard I/O
-opInt = 1
-
-# File writing interval
-fwInt = 2
-
-# Tolerance value in Jacobi iterations
-VpTolerance = 1.0e-5
-
-# Tolerance value in Poisson iterations
-PoissonTolerance = 1.0e-3
-
-gssor = 1.6  # omega for SOR
-
-maxCount = 1e4
-
-print('# Tolerance', VpTolerance, PoissonTolerance)
-#################################################
 
 
 ############# Fields Initialization #########
@@ -117,6 +60,75 @@ Ht.fill(0.0)
 #################################
 
 
+########## MPI Parallelization ###########
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+nprocs = comm.Get_size()
+
+locn = int(Nz/nprocs)
+bn = 1 + locn*rank
+en = bn + locn 
+
+kbn = bn
+if rank==0:
+    kbn = bn-1
+
+if rank == nprocs-1:
+    en = Nx-1
+
+ken = en
+if rank==nprocs-1:
+    ken = Nx
+
+if rank==0:
+    print('# Grid', Nx, Ny, Nz)
+    print('#No. of Processors =',nprocs)
+
+print('#',rank, bn, en)
+########################################
+
+
+#### Flow Parameters #############
+Ra = 1.0e5
+
+Pr = 0.786
+
+Ta = 0.0e7
+
+nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
+
+if rank==0:
+    print('#', 'Ra=', Ra, 'Pr=', Pr)
+#########################################################
+
+
+
+#########Simulation Parameters #########################
+dt = 0.01
+
+tMax = 1000
+
+# Number of iterations after which output must be printed to standard I/O
+opInt = 1
+
+# File writing interval
+fwInt = 2
+
+# Tolerance value in Jacobi iterations
+VpTolerance = 1.0e-5
+
+# Tolerance value in Poisson iterations
+PoissonTolerance = 1.0e-3
+
+gssor = 1.6  # omega for SOR
+
+maxCount = 1e4
+
+if rank==0:
+    print('# Tolerance', VpTolerance, PoissonTolerance)
+#################################################
+
+
 time = 0
 fwTime = 0.0
 iCnt = 1
@@ -144,10 +156,10 @@ def getDiv(U, V, W):
     
     locdivMax = np.max(abs(divMat))
 
-    totdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
+    globdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
 
     #return np.unravel_index(divNyat.argmax(), divMat.shape), np.mean(divMat)
-    return totdivMax
+    return globdivMax
 
 
 
@@ -155,7 +167,6 @@ def data_transfer(F):
     if nprocs > 1:
 
         if rank == 0:
-
             #F[en, :, :] = comm.Sendrecv(F[en-1, :, :], dest = rank+1, source = rank+1)
 
             comm.Send(F[en-1, :, :], dest = rank+1)
@@ -446,18 +457,29 @@ while True:
 
     if iCnt % opInt == 0:
 
+        #uSqrLoc = U[kbn:ken, :, :]**2.0 + V[kbn:ken, :, :]**2.0 + W[kbn:ken, :, :]**2.0
+        #uInt = integrate.simps(integrate.simps(integrate.simps(uSqrLoc[kbn:ken, :, :], x[kbn:ken]), y[kbn:ken]), z[kbn:ken])
+
+        #locU = np.sum(np.sqrt(U[kbn:ken, :, :]**2.0 + V[kbn:ken, :, :]**2.0 + W[kbn:ken, :, :]**2.0))
         locU = np.sum(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
         globU = comm.reduce(locU, op=MPI.SUM, root=0)
        
+        #locWT = np.sum(W[kbn:ken, :, :]*T[kbn:ken, :, :])
         locWT = np.sum(W[bn:en, 1:Ny-1, 1:Nz-1]*T[bn:en, 1:Ny-1, 1:Nz-1])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
+            #uSqrGlob = np.zeros_like(U)
+            #comm.Gather(uSqrLoc, uSqrGlob,  root =0)
+            #uInt = integrate.simps(integrate.simps(integrate.simps(uSqrGlob, x), y), z)
+            #globU = globU/(Nx*Ny*Nz)
             globU = globU/((Nx-2)*(Ny-2)*(Nz-2))
             Re = globU/nu
-            Nu = 1.0 + totalWT/(kappa*((Nx-2)*(Ny-2)*(Nz-2)))
+            #Re = np.sqrt(uInt)/nu
+            #Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
+            Nu = 1.0 + totalWT/(kappa*(Nx-2)*(Ny-2)*(Nz-2))
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
 
@@ -507,22 +529,23 @@ while True:
     imposePBCs(P)                               
     imposeTBCs(T)       
 
- 
-    '''
-    Umax, Vmax, Wmax, Tmax, Pmax = np.amax(abs(U)), np.amax(abs(V)), np.amax(abs(W)), np.amax(abs(T)), np.amax(abs(P))
-    tUmax = comm.reduce(Umax, op=MPI.MAX, root=0)
-    tVmax = comm.reduce(Vmax, op=MPI.MAX, root=0)
-    tWmax = comm.reduce(Wmax, op=MPI.MAX, root=0)
-    tTmax = comm.reduce(Tmax, op=MPI.MAX, root=0)
-    tPmax = comm.reduce(Pmax, op=MPI.MAX, root=0)
-    if rank==0:
-        print(tUmax, tVmax, tWmax, tTmax, tPmax)
+
+    #if abs(fwTime - time) < 0.5*dt and rank==0:
+    #if abs(time-0.1) < 1e-3:
+    #    writeSoln(U, V, W, P, T, time)
     
     '''
-    '''
     #if abs(fwTime - time) < 0.5*dt:
-    if abs(time - tMax)<1e-5:
-        writeSoln(U, V, W, P, T, time)
+    if abs(time - 0.05)<1e-5:
+        Uglobal, Vglobal, Wglobal, Pglobal, Tglobal = np.zeros_like(U), np.zeros_like(U), np.zeros_like(U), np.zeros_like(U), np.zeros_like(U),
+        Ulocal, Vlocal, Wlocal, Plocal, Tlocal = U[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :]
+        comm.Gather(Ulocal, Uglobal,  root =0)
+        comm.Gather(Vlocal, Vglobal,  root =0)
+        comm.Gather(Wlocal, Wglobal,  root =0)
+        comm.Gather(Plocal, Pglobal,  root =0)
+        comm.Gather(Tlocal, Tglobal,  root =0)
+        if rank == 0:
+            writeSoln(Uglobal, Vglobal, Wglobal, Pglobal, Tglobal, time)
         Z, Y = np.meshgrid(y,z)
         plt.contourf(Y, Z, T[int(Nx/2), :, :], 500, cmap=cm.coolwarm)
         clb = plt.colorbar()
@@ -531,8 +554,8 @@ while True:
         clb.ax.set_title(r'$T$', fontsize = 20)
         plt.show()
         fwTime = fwTime + fwInt      
-
-    '''
+        '''
+    
 
     if time > tMax:
         break   
@@ -543,7 +566,7 @@ while True:
 
     t2 = datetime.now()
 
-    #print(t2-t1)
+    #print("time take in one time step marching=",t2-t1)
 
 
 
