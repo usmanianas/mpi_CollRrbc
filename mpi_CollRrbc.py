@@ -12,7 +12,7 @@ import scipy.integrate as integrate
 #### Grid Parameters ###########################
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx = 40
+Nx = 16
 Ny, Nz = Nx, Nx
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
@@ -26,7 +26,6 @@ hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
 
 #############################################################
-
 
 
 ############# Fields Initialization #########
@@ -89,9 +88,9 @@ print('#',rank, bn, en)
 
 
 #### Flow Parameters #############
-Ra = 1.0e5
+Ra = 1.0e4
 
-Pr = 0.786
+Pr = 1
 
 Ta = 0.0e7
 
@@ -402,7 +401,7 @@ def PoissonSolver(rho):
 
         data_transfer(Pp)
 
-        #imposePBCs(Pp)
+        imposePpBCs(Pp)
     
         locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] -((
                         (Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
@@ -435,7 +434,7 @@ def imposeVBCs(V):
     V[:, :, 0], V[:, :, -1] = 0.0, 0.0
 
 def imposeWBCs(W):
-    W[0, :, :], W[-1, :, :] = 0.0, 0.0, 
+    W[0, :, :], W[-1, :, :] = 0.0, 0.0 
     W[:, 0, :], W[:, -1, :] = 0.0, 0.0
     W[:, :, 0], W[:, :, -1] = 0.0, 0.0  
 
@@ -449,6 +448,10 @@ def imposePBCs(P):
     P[:, 0, :], P[:, -1, :] = P[:, 1, :], P[:, -2, :]
     P[:, :, 0], P[:, :, -1] = P[:, :, 1], P[:, :, -2]
 
+def imposePpBCs(Pp):
+    Pp[0, :, :], Pp[-1, :, :] = 0.0, 0.0 #Pp[1, :, :], Pp[-2, :, :]
+    Pp[:, 0, :], Pp[:, -1, :] = 0.0, 0.0 #Pp[:, 1, :], Pp[:, -2, :]
+    Pp[:, :, 0], Pp[:, :, -1] = 0.0, 0.0 #Pp[:, :, 1], P[:, :, -2]
 
 
 while True:
@@ -457,29 +460,18 @@ while True:
 
     if iCnt % opInt == 0:
 
-        #uSqrLoc = U[kbn:ken, :, :]**2.0 + V[kbn:ken, :, :]**2.0 + W[kbn:ken, :, :]**2.0
-        #uInt = integrate.simps(integrate.simps(integrate.simps(uSqrLoc[kbn:ken, :, :], x[kbn:ken]), y[kbn:ken]), z[kbn:ken])
-
-        #locU = np.sum(np.sqrt(U[kbn:ken, :, :]**2.0 + V[kbn:ken, :, :]**2.0 + W[kbn:ken, :, :]**2.0))
-        locU = np.sum(np.sqrt(U[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + V[bn:en, 1:Ny-1, 1:Nz-1]**2.0 + W[bn:en, 1:Ny-1, 1:Nz-1]**2.0))
+        locU = np.sum(np.sqrt(U[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + V[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + W[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0))
         globU = comm.reduce(locU, op=MPI.SUM, root=0)
        
         #locWT = np.sum(W[kbn:ken, :, :]*T[kbn:ken, :, :])
-        locWT = np.sum(W[bn:en, 1:Ny-1, 1:Nz-1]*T[bn:en, 1:Ny-1, 1:Nz-1])
+        locWT = np.sum(W[kbn:ken, 1:Ny-1, 1:Nz-1]*T[kbn:ken, 1:Ny-1, 1:Nz-1])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
 
         if rank == 0:
-            #uSqrGlob = np.zeros_like(U)
-            #comm.Gather(uSqrLoc, uSqrGlob,  root =0)
-            #uInt = integrate.simps(integrate.simps(integrate.simps(uSqrGlob, x), y), z)
-            #globU = globU/(Nx*Ny*Nz)
-            globU = globU/((Nx-2)*(Ny-2)*(Nz-2))
-            Re = globU/nu
-            #Re = np.sqrt(uInt)/nu
-            #Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
-            Nu = 1.0 + totalWT/(kappa*(Nx-2)*(Ny-2)*(Nz-2))
+            Re = globU/(nu*Nx*Ny*Nz)
+            Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
 
@@ -527,35 +519,7 @@ while True:
     imposeVBCs(V)                               
     imposeWBCs(W)                               
     imposePBCs(P)                               
-    imposeTBCs(T)       
-
-
-    #if abs(fwTime - time) < 0.5*dt and rank==0:
-    #if abs(time-0.1) < 1e-3:
-    #    writeSoln(U, V, W, P, T, time)
-    
-    '''
-    #if abs(fwTime - time) < 0.5*dt:
-    if abs(time - 0.05)<1e-5:
-        Uglobal, Vglobal, Wglobal, Pglobal, Tglobal = np.zeros_like(U), np.zeros_like(U), np.zeros_like(U), np.zeros_like(U), np.zeros_like(U),
-        Ulocal, Vlocal, Wlocal, Plocal, Tlocal = U[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :], V[kbn:ken, :, :]
-        comm.Gather(Ulocal, Uglobal,  root =0)
-        comm.Gather(Vlocal, Vglobal,  root =0)
-        comm.Gather(Wlocal, Wglobal,  root =0)
-        comm.Gather(Plocal, Pglobal,  root =0)
-        comm.Gather(Tlocal, Tglobal,  root =0)
-        if rank == 0:
-            writeSoln(Uglobal, Vglobal, Wglobal, Pglobal, Tglobal, time)
-        Z, Y = np.meshgrid(y,z)
-        plt.contourf(Y, Z, T[int(Nx/2), :, :], 500, cmap=cm.coolwarm)
-        clb = plt.colorbar()
-        plt.quiver(Y[0:Nx,0:Ny], Z[0:Nx,0:Ny], V[int(Nx/2),:, :], W[int(Nx/2), :, :])
-        plt.axis('scaled')
-        clb.ax.set_title(r'$T$', fontsize = 20)
-        plt.show()
-        fwTime = fwTime + fwInt      
-        '''
-    
+    imposeTBCs(T)           
 
     if time > tMax:
         break   
