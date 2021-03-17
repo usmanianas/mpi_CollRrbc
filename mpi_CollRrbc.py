@@ -1,4 +1,3 @@
-
 import numpy as np
 import pylab as plt
 from matplotlib import cm
@@ -9,57 +8,53 @@ from datetime import datetime
 import random 
 import scipy.integrate as integrate
 
-#### Grid Parameters ###########################
+############### Grid Parameters ###############
+
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx = 16
-Ny, Nz = Nx, Nx
+Nx, Ny, Nz = 16, 16, 16
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
 
-x = np.linspace(0, 1, Nx, endpoint=True)        
-y = np.linspace(0, 1, Ny, endpoint=True)
-z = np.linspace(0, 1, Nz, endpoint=True)    
+x = np.linspace(0, Lx, Nx, endpoint=True)        
+y = np.linspace(0, Ly, Ny, endpoint=True)
+z = np.linspace(0, Lz, Nz, endpoint=True)    
 
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
 idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
 
-#############################################################
+###############################################
 
 
-############# Fields Initialization #########
-P = np.ones([Nx, Ny, Nz])
+############# Fields Initialization ###########
 
-T = np.zeros([Nx, Ny, Nz])
-
-T[:, :, 0:Nz] = 1 - z[0:Nz]
-
+# Field variables
 U = np.zeros([Nx, Ny, Nz])
-
 V = np.zeros([Nx, Ny, Nz])
-
 W = np.zeros([Nx, Ny, Nz])
+T = np.zeros([Nx, Ny, Nz])
+P = np.zeros([Nx, Ny, Nz])
 
-divMat = np.zeros([Nx, Ny, Nz])
-
+# Auxilliary variables
 Pp = np.zeros([Nx, Ny, Nz])
 
-
+# RHS Terms
 Hx = np.zeros_like(U)
 Hy = np.zeros_like(V)
 Hz = np.zeros_like(W)
 Ht = np.zeros_like(T)   
 Pp = np.zeros_like(P)
 
-Hx.fill(0.0)
-Hy.fill(0.0)
-Hz.fill(0.0)
-Ht.fill(0.0)
-#################################
+# Initialize values
+P.fill(1.0)
+T[:, :, 0:Nz] = 1 - z[0:Nz]
+
+###############################################
 
 
-########## MPI Parallelization ###########
+############# MPI Parallelization #############
+
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
@@ -68,44 +63,52 @@ locn = int(Nz/nprocs)
 bn = 1 + locn*rank
 en = bn + locn 
 
+rootRank = rank == 0
+
+lftRank = rank - 1
+rgtRank = rank + 1
+
 kbn = bn
-if rank==0:
+if rank == 0:
     kbn = bn-1
+    lftRank = MPI.PROC_NULL
 
 if rank == nprocs-1:
     en = Nx-1
+    rgtRank = MPI.PROC_NULL
 
 ken = en
-if rank==nprocs-1:
+if rank == nprocs-1:
     ken = Nx
 
-if rank==0:
+if rank == 0:
     print('# Grid', Nx, Ny, Nz)
     print('#No. of Processors =',nprocs)
 
-print('#',rank, bn, en)
-########################################
+print('#', rank, bn, en)
 
+###############################################
 
-#### Flow Parameters #############
+############### Flow Parameters ###############
+
 Ra = 1.0e4
-
-Pr = 1
-
-Ta = 0.0e7
+Pr = 1.0
+Ta = 0.0
 
 nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
-if rank==0:
+if rootRank:
     print('#', 'Ra=', Ra, 'Pr=', Pr)
-#########################################################
 
+###############################################
 
+########### Simulation Parameters #############
 
-#########Simulation Parameters #########################
+# Time step
 dt = 0.01
 
-tMax = 1000
+# Final time
+tMax = 0.1
 
 # Number of iterations after which output must be printed to standard I/O
 opInt = 1
@@ -123,18 +126,15 @@ gssor = 1.6  # omega for SOR
 
 maxCount = 1e4
 
-if rank==0:
+if rootRank:
     print('# Tolerance', VpTolerance, PoissonTolerance)
-#################################################
 
+###############################################
 
-time = 0
-fwTime = 0.0
-iCnt = 1
 
 def writeSoln(U, V, W, P, T, time):
 
-    fName = "Soln_" + "{0:09.5f}.h5".format(time)
+    fName = "Soln_{0:09.5f}.h5".format(time)
     print("#Writing solution file: ", fName)        
     f = hp.File(fName, "w")
 
@@ -149,41 +149,25 @@ def writeSoln(U, V, W, P, T, time):
 
 def getDiv(U, V, W):
 
-    divMat[bn:en, 1:Ny-1, 1:Nz-1] = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])*0.5/hx +
-                                (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])*0.5/hy +
-                                (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])*0.5/hz)
+    divMat = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])*0.5/hx +
+              (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])*0.5/hy +
+              (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])*0.5/hz)
     
     locdivMax = np.max(abs(divMat))
 
     globdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
 
-    #return np.unravel_index(divNyat.argmax(), divMat.shape), np.mean(divMat)
     return globdivMax
-
 
 
 def data_transfer(F):
     if nprocs > 1:
 
-        if rank == 0:
-            #F[en, :, :] = comm.Sendrecv(F[en-1, :, :], dest = rank+1, source = rank+1)
+        comm.Send(F[en-1, :, :], dest = rgtRank)
+        comm.Recv(F[en, :, :], source = rgtRank)
 
-            comm.Send(F[en-1, :, :], dest = rank+1)
-            comm.Recv(F[en, :, :], source = rank+1)
-
-        if rank > 0 and rank < nprocs-1:
-
-            comm.Send(F[en-1, :, :], dest = rank+1)
-            comm.Recv(F[en, :, :], source = rank+1)
-
-            comm.Send(F[bn, :, :], dest = rank-1)
-            comm.Recv(F[bn-1, :, :], source = rank-1)  
-
-        if rank == nprocs-1:
-
-            comm.Send(F[bn, :, :], dest = rank-1)
-            comm.Recv(F[bn-1, :, :], source = rank-1)
-
+        comm.Send(F[bn, :, :], dest = lftRank)
+        comm.Recv(F[bn-1, :, :], source = lftRank)  
 
 
 def computeNLinDiff_X(U, V, W):
@@ -454,6 +438,9 @@ def imposePpBCs(Pp):
     Pp[:, :, 0], Pp[:, :, -1] = 0.0, 0.0 #Pp[:, :, 1], P[:, :, -2]
 
 
+iCnt = 1
+time = 0
+
 while True:
 
     t1 = datetime.now()
@@ -462,14 +449,14 @@ while True:
 
         locU = np.sum(np.sqrt(U[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + V[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + W[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0))
         globU = comm.reduce(locU, op=MPI.SUM, root=0)
-       
+    
         #locWT = np.sum(W[kbn:ken, :, :]*T[kbn:ken, :, :])
         locWT = np.sum(W[kbn:ken, 1:Ny-1, 1:Nz-1]*T[kbn:ken, 1:Ny-1, 1:Nz-1])
         totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
         maxDiv = getDiv(U, V, W)
 
-        if rank == 0:
+        if rootRank:
             Re = globU/(nu*Nx*Ny*Nz)
             Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
             print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
@@ -530,13 +517,6 @@ while True:
 
     t2 = datetime.now()
 
-    #print("time take in one time step marching=",t2-t1)
+    #print("Time taken in one time step marching=",t2-t1)
 
-
-
-
-
-
-
-
-
+#main()
