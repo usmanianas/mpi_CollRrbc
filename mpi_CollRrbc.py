@@ -12,7 +12,7 @@ import scipy.integrate as integrate
 
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 16, 16, 16
+Nx, Ny, Nz = 33, 33, 33
 
 hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
 
@@ -26,18 +26,64 @@ idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
 
 ###############################################
 
+############# MPI Parallelization #############
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+nprocs = comm.Get_size()
+
+locNx = int(Nx/nprocs) + 1
+xSize = locNx + 2
+
+bn = 1 + locNx*rank
+en = bn + locNx 
+
+rootRank = rank == 0
+frstRank = rank == 0
+lastRank = rank == nprocs - 1
+
+lftRank = rank - 1
+rgtRank = rank + 1
+
+xSt, ySt, zSt = 1, 1, 1
+xEn, yEn, zEn = locNx+1, Ny-1, Nz-1
+
+kbn = bn
+if frstRank:
+    lftRank = MPI.PROC_NULL
+    xSize = locNx + 1
+    xEn = locNx
+
+    kbn = bn-1
+
+ken = en
+if lastRank:
+    rgtRank = MPI.PROC_NULL
+    xSize = locNx + 1
+    xEn = locNx
+
+    ken = Nx
+    en = Nx-1
+
+if rootRank:
+    print('# Grid', Nx, Ny, Nz)
+    print('#No. of Processors =',nprocs)
+
+print('#', rank, bn, en)
+
+###############################################
 
 ############# Fields Initialization ###########
 
 # Field variables
-U = np.zeros([Nx, Ny, Nz])
-V = np.zeros([Nx, Ny, Nz])
-W = np.zeros([Nx, Ny, Nz])
-T = np.zeros([Nx, Ny, Nz])
-P = np.zeros([Nx, Ny, Nz])
+U = np.zeros([xSize, Ny, Nz])
+V = np.zeros([xSize, Ny, Nz])
+W = np.zeros([xSize, Ny, Nz])
+T = np.zeros([xSize, Ny, Nz])
+P = np.zeros([xSize, Ny, Nz])
 
 # Auxilliary variables
-Pp = np.zeros([Nx, Ny, Nz])
+Pp = np.zeros([xSize, Ny, Nz])
 
 # RHS Terms
 Hx = np.zeros_like(U)
@@ -49,43 +95,6 @@ Pp = np.zeros_like(P)
 # Initialize values
 P.fill(1.0)
 T[:, :, 0:Nz] = 1 - z[0:Nz]
-
-###############################################
-
-
-############# MPI Parallelization #############
-
-comm = MPI.COMM_WORLD
-rank = comm.Get_rank()
-nprocs = comm.Get_size()
-
-locn = int(Nz/nprocs)
-bn = 1 + locn*rank
-en = bn + locn 
-
-rootRank = rank == 0
-
-lftRank = rank - 1
-rgtRank = rank + 1
-
-kbn = bn
-if rank == 0:
-    kbn = bn-1
-    lftRank = MPI.PROC_NULL
-
-if rank == nprocs-1:
-    en = Nx-1
-    rgtRank = MPI.PROC_NULL
-
-ken = en
-if rank == nprocs-1:
-    ken = Nx
-
-if rank == 0:
-    print('# Grid', Nx, Ny, Nz)
-    print('#No. of Processors =',nprocs)
-
-print('#', rank, bn, en)
 
 ###############################################
 
@@ -110,7 +119,7 @@ dt = 0.01
 # Final time
 tMax = 0.1
 
-# Number of iterations after which output must be printed to standard I/O
+# Number of iterations at which output is sent to standard I/O
 opInt = 1
 
 # File writing interval
@@ -122,8 +131,10 @@ VpTolerance = 1.0e-5
 # Tolerance value in Poisson iterations
 PoissonTolerance = 1.0e-3
 
-gssor = 1.6  # omega for SOR
+# Omega for SOR
+gssor = 1.6
 
+# Maximum iterations for iterative solvers
 maxCount = 1e4
 
 if rootRank:
@@ -149,9 +160,9 @@ def writeSoln(U, V, W, P, T, time):
 
 def getDiv(U, V, W):
 
-    divMat = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])*0.5/hx +
-              (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])*0.5/hy +
-              (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])*0.5/hz)
+    divMat = ((U[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - U[xSt-1:xEn-1, ySt:yEn, zSt:zEn])*0.5/hx +
+              (V[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - V[xSt:xEn, ySt-1:yEn-1, zSt:zEn])*0.5/hy +
+              (W[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - W[xSt:xEn, ySt:yEn, zSt-1:zEn-1])*0.5/hz)
     
     locdivMax = np.max(abs(divMat))
 
@@ -172,55 +183,55 @@ def data_transfer(F):
 
 def computeNLinDiff_X(U, V, W):
 
-    Hx[bn:en, 1:Ny-1, 1:Nz-1] = (((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
-                                (U[bn:en, 2:Ny, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
-                                (U[bn:en, 1:Ny-1, 2:Nz] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
-                              U[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
-                              V[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn:en, 2:Ny, 1:Nz-1] - U[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
-                              W[bn:en, 1:Ny-1, 1:Nz-1]*(U[bn:en, 1:Ny-1, 2:Nz] - U[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
+    Hx[xSt:xEn, ySt:yEn, zSt:zEn] = (((U[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/hx2 + 
+                                      (U[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/hy2 + 
+                                      (U[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/hz2)*0.5*nu -
+                                       U[xSt:xEn, ySt:yEn, zSt:zEn]*(U[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - U[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx) -
+                                       V[xSt:xEn, ySt:yEn, zSt:zEn]*(U[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - U[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy) - 
+                                       W[xSt:xEn, ySt:yEn, zSt:zEn]*(U[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - U[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz))
 
-    return Hx[bn:en, 1:Ny-1, 1:Nz-1]
+    return Hx[xSt:xEn, ySt:yEn, zSt:zEn]
 
 
 def computeNLinDiff_Y(U, V, W):
 
-    Hy[bn:en, 1:Ny-1, 1:Nz-1] = (((V[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
-                                (V[bn:en, 2:Ny, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
-                                (V[bn:en, 1:Ny-1, 2:Nz] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
-                              U[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn+1:en+1, 1:Ny-1, 1:Nz-1] - V[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
-                              V[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
-                              W[bn:en, 1:Ny-1, 1:Nz-1]*(V[bn:en, 1:Ny-1, 2:Nz] - V[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
+    Hy[xSt:xEn, ySt:yEn, zSt:zEn] = (((V[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/hx2 + 
+                                      (V[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/hy2 + 
+                                      (V[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/hz2)*0.5*nu -
+                                       U[xSt:xEn, ySt:yEn, zSt:zEn]*(V[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - V[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx) -
+                                       V[xSt:xEn, ySt:yEn, zSt:zEn]*(V[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - V[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy) - 
+                                       W[xSt:xEn, ySt:yEn, zSt:zEn]*(V[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - V[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz))
 
-    return Hy[bn:en, 1:Ny-1, 1:Nz-1]
+    return Hy[xSt:xEn, ySt:yEn, zSt:zEn]
 
 
 def computeNLinDiff_Z(U, V, W):
     global Hz
     global Nz, Ny, Nx, Nx, Ny, Nz
 
-    Hz[bn:en, 1:Ny-1, 1:Nz-1] = (((W[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
-                                (W[bn:en, 2:Ny, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
-                                (W[bn:en, 1:Ny-1, 2:Nz] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*nu -
-                              U[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn+1:en+1, 1:Ny-1, 1:Nz-1] - W[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) -
-                              V[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn:en, 2:Ny, 1:Nz-1] - W[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
-                              W[bn:en, 1:Ny-1, 1:Nz-1]*(W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
+    Hz[xSt:xEn, ySt:yEn, zSt:zEn] = (((W[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/hx2 + 
+                                      (W[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/hy2 + 
+                                      (W[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/hz2)*0.5*nu -
+                                       U[xSt:xEn, ySt:yEn, zSt:zEn]*(W[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - W[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx) -
+                                       V[xSt:xEn, ySt:yEn, zSt:zEn]*(W[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - W[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy) - 
+                                       W[xSt:xEn, ySt:yEn, zSt:zEn]*(W[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - W[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz))
 
 
-    return Hz[bn:en, 1:Ny-1, 1:Nz-1]
+    return Hz[xSt:xEn, ySt:yEn, zSt:zEn]
 
 
 def computeNLinDiff_T(U, V, W, T):
     global Ht
     global Nz, Ny, Nx
 
-    Ht[bn:en, 1:Ny-1, 1:Nz-1] = (((T[bn+1:en+1, 1:Ny-1, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn-1:en-1, 1:Ny-1, 1:Nz-1])/hx2 + 
-                                (T[bn:en, 2:Ny, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 0:Ny-2, 1:Nz-1])/hy2 + 
-                                (T[bn:en, 1:Ny-1, 2:Nz] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 1:Ny-1, 0:Nz-2])/hz2)*0.5*kappa -
-                              U[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn+1:en+1, 1:Ny-1, 1:Nz-1] - T[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx)-
-                              V[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn:en, 2:Ny, 1:Nz-1] - T[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) - 
-                              W[bn:en, 1:Ny-1, 1:Nz-1]*(T[bn:en, 1:Ny-1, 2:Nz] - T[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))
+    Ht[xSt:xEn, ySt:yEn, zSt:zEn] = (((T[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/hx2 + 
+                                      (T[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/hy2 + 
+                                      (T[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/hz2)*0.5*kappa -
+                                       U[xSt:xEn, ySt:yEn, zSt:zEn]*(T[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - T[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx)-
+                                       V[xSt:xEn, ySt:yEn, zSt:zEn]*(T[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - T[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy) - 
+                                       W[xSt:xEn, ySt:yEn, zSt:zEn]*(T[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - T[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz))
 
-    return Ht[bn:en, 1:Ny-1, 1:Nz-1]
+    return Ht[xSt:xEn, ySt:yEn, zSt:zEn]
 
 
 def uJacobi(rho):
@@ -228,33 +239,32 @@ def uJacobi(rho):
     jCnt = 0
     while True:
 
-        U[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
-                                       0.5*nu*dt*idx2*(U[bn-1:en-1, 1:Ny-1, 1:Nz-1] + U[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
-                                       0.5*nu*dt*idy2*(U[bn:en, 0:Ny-2, 1:Nz-1] + U[bn:en, 2:Ny, 1:Nz-1]) +
-                                       0.5*nu*dt*idz2*(U[bn:en, 1:Ny-1, 0:Nz-2] + U[bn:en, 1:Ny-1, 2:Nz]))          
+        U[xSt:xEn, ySt:yEn, zSt:zEn] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[xSt:xEn, ySt:yEn, zSt:zEn] + 
+                                       0.5*nu*dt*idx2*(U[xSt-1:xEn-1, ySt:yEn, zSt:zEn] + U[xSt+1:xEn+1, ySt:yEn, zSt:zEn]) +
+                                       0.5*nu*dt*idy2*(U[xSt:xEn, ySt-1:yEn-1, zSt:zEn] + U[xSt:xEn, ySt+1:yEn+1, zSt:zEn]) +
+                                       0.5*nu*dt*idz2*(U[xSt:xEn, ySt:yEn, zSt-1:zEn-1] + U[xSt:xEn, ySt:yEn, zSt+1:zEn+1]))          
 
         data_transfer(U)
 
         imposeUBCs(U)
         
-        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (U[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
-                            (U[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
-                            (U[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 2:Ny, 1:Nz-1])/hy2 +
-                            (U[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*U[bn:en, 1:Ny-1, 1:Nz-1] + U[bn:en, 1:Ny-1, 2:Nz])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[xSt:xEn, ySt:yEn, zSt:zEn] - (U[xSt:xEn, ySt:yEn, zSt:zEn] - 0.5*nu*dt*(
+                            (U[xSt-1:xEn-1, ySt:yEn, zSt:zEn] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt+1:xEn+1, ySt:yEn, zSt:zEn])/hx2 +
+                            (U[xSt:xEn, ySt-1:yEn-1, zSt:zEn] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt:xEn, ySt+1:yEn+1, zSt:zEn])/hy2 +
+                            (U[xSt:xEn, ySt:yEn, zSt-1:zEn-1] - 2.0*U[xSt:xEn, ySt:yEn, zSt:zEn] + U[xSt:xEn, ySt:yEn, zSt+1:zEn+1])/hz2))))
         
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < VpTolerance:
-            #print(jCnt)
             break
         
         jCnt += 1
         if jCnt > maxCount:
-                print("ERROR: Jacobi not converging in U. Aborting")
-                quit()
+            print("ERROR: Jacobi not converging in U. Aborting")
+            quit()
 
-    return U[bn:en, 1:Ny-1, 1:Nz-1]        
+    return U[xSt:xEn, ySt:yEn, zSt:zEn]        
 
 
 def vJacobi(rho):
@@ -262,10 +272,10 @@ def vJacobi(rho):
     jCnt = 0
     while True:
 
-        V[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
-                                       0.5*nu*dt*idx2*(V[bn-1:en-1, 1:Ny-1, 1:Nz-1] + V[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
-                                       0.5*nu*dt*idy2*(V[bn:en, 0:Ny-2, 1:Nz-1] + V[bn:en, 2:Ny, 1:Nz-1]) +
-                                       0.5*nu*dt*idz2*(V[bn:en, 1:Ny-1, 0:Nz-2] + V[bn:en, 1:Ny-1, 2:Nz]))  
+        V[xSt:xEn, ySt:yEn, zSt:zEn] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[xSt:xEn, ySt:yEn, zSt:zEn] + 
+                                       0.5*nu*dt*idx2*(V[xSt-1:xEn-1, ySt:yEn, zSt:zEn] + V[xSt+1:xEn+1, ySt:yEn, zSt:zEn]) +
+                                       0.5*nu*dt*idy2*(V[xSt:xEn, ySt-1:yEn-1, zSt:zEn] + V[xSt:xEn, ySt+1:yEn+1, zSt:zEn]) +
+                                       0.5*nu*dt*idz2*(V[xSt:xEn, ySt:yEn, zSt-1:zEn-1] + V[xSt:xEn, ySt:yEn, zSt+1:zEn+1]))  
 
 
         data_transfer(V)
@@ -273,15 +283,14 @@ def vJacobi(rho):
         imposeVBCs(V)
 
 
-        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (V[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
-                        (V[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
-                        (V[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 2:Ny, 1:Nz-1])/hy2 +
-                        (V[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*V[bn:en, 1:Ny-1, 1:Nz-1] + V[bn:en, 1:Ny-1, 2:Nz])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[xSt:xEn, ySt:yEn, zSt:zEn] - (V[xSt:xEn, ySt:yEn, zSt:zEn] - 0.5*nu*dt*(
+                        (V[xSt-1:xEn-1, ySt:yEn, zSt:zEn] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt+1:xEn+1, ySt:yEn, zSt:zEn])/hx2 +
+                        (V[xSt:xEn, ySt-1:yEn-1, zSt:zEn] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt:xEn, ySt+1:yEn+1, zSt:zEn])/hy2 +
+                        (V[xSt:xEn, ySt:yEn, zSt-1:zEn-1] - 2.0*V[xSt:xEn, ySt:yEn, zSt:zEn] + V[xSt:xEn, ySt:yEn, zSt+1:zEn+1])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < VpTolerance:
-            #print(jCnt)
             break
     
         jCnt += 1
@@ -289,7 +298,7 @@ def vJacobi(rho):
             print("ERROR: Jacobi not converging in V. Aborting")
             quit()
     
-    return V[bn:en, 1:Ny-1, 1:Nz-1]
+    return V[xSt:xEn, ySt:yEn, zSt:zEn]
 
 
 def wJacobi(rho):
@@ -297,34 +306,32 @@ def wJacobi(rho):
     jCnt = 0
     while True:
 
-        W[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
-                                       0.5*nu*dt*idx2*(W[bn-1:en-1, 1:Ny-1, 1:Nz-1] + W[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
-                                       0.5*nu*dt*idy2*(W[bn:en, 0:Ny-2, 1:Nz-1] + W[bn:en, 2:Ny, 1:Nz-1]) +
-                                       0.5*nu*dt*idz2*(W[bn:en, 1:Ny-1, 0:Nz-2] + W[bn:en, 1:Ny-1, 2:Nz]))         
+        W[xSt:xEn, ySt:yEn, zSt:zEn] =(1.0/(1+nu*dt*(idx2 + idy2 + idz2))) * (rho[xSt:xEn, ySt:yEn, zSt:zEn] + 
+                                       0.5*nu*dt*idx2*(W[xSt-1:xEn-1, ySt:yEn, zSt:zEn] + W[xSt+1:xEn+1, ySt:yEn, zSt:zEn]) +
+                                       0.5*nu*dt*idy2*(W[xSt:xEn, ySt-1:yEn-1, zSt:zEn] + W[xSt:xEn, ySt+1:yEn+1, zSt:zEn]) +
+                                       0.5*nu*dt*idz2*(W[xSt:xEn, ySt:yEn, zSt-1:zEn-1] + W[xSt:xEn, ySt:yEn, zSt+1:zEn+1]))         
 
         data_transfer(W)
     
         imposeWBCs(W)
 
 
-        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (W[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*nu*dt*(
-                        (W[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
-                        (W[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 2:Ny, 1:Nz-1])/hy2 +
-                        (W[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*W[bn:en, 1:Ny-1, 1:Nz-1] + W[bn:en, 1:Ny-1, 2:Nz])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[xSt:xEn, ySt:yEn, zSt:zEn] - (W[xSt:xEn, ySt:yEn, zSt:zEn] - 0.5*nu*dt*(
+                        (W[xSt-1:xEn-1, ySt:yEn, zSt:zEn] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt+1:xEn+1, ySt:yEn, zSt:zEn])/hx2 +
+                        (W[xSt:xEn, ySt-1:yEn-1, zSt:zEn] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt:xEn, ySt+1:yEn+1, zSt:zEn])/hy2 +
+                        (W[xSt:xEn, ySt:yEn, zSt-1:zEn-1] - 2.0*W[xSt:xEn, ySt:yEn, zSt:zEn] + W[xSt:xEn, ySt:yEn, zSt+1:zEn+1])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < VpTolerance:
-            #print(jCnt)
             break
-
 
         jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in W. Aborting")
             quit()
     
-    return W[bn:en, 1:Ny-1, 1:Nz-1]       
+    return W[xSt:xEn, ySt:yEn, zSt:zEn]       
 
 
 def TJacobi(rho):
@@ -332,24 +339,23 @@ def TJacobi(rho):
     jCnt = 0
     while True:
 
-        T[bn:en, 1:Ny-1, 1:Nz-1] =(1.0/(1+kappa*dt*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] + 
-                                       0.5*kappa*dt*idx2*(T[bn-1:en-1, 1:Ny-1, 1:Nz-1] + T[bn+1:en+1, 1:Ny-1, 1:Nz-1]) +
-                                       0.5*kappa*dt*idy2*(T[bn:en, 0:Ny-2, 1:Nz-1] + T[bn:en, 2:Ny, 1:Nz-1]) +
-                                       0.5*kappa*dt*idz2*(T[bn:en, 1:Ny-1, 0:Nz-2] + T[bn:en, 1:Ny-1, 2:Nz])) 
+        T[xSt:xEn, ySt:yEn, zSt:zEn] =(1.0/(1+kappa*dt*(idx2 + idy2 + idz2))) * (rho[xSt:xEn, ySt:yEn, zSt:zEn] + 
+                                       0.5*kappa*dt*idx2*(T[xSt-1:xEn-1, ySt:yEn, zSt:zEn] + T[xSt+1:xEn+1, ySt:yEn, zSt:zEn]) +
+                                       0.5*kappa*dt*idy2*(T[xSt:xEn, ySt-1:yEn-1, zSt:zEn] + T[xSt:xEn, ySt+1:yEn+1, zSt:zEn]) +
+                                       0.5*kappa*dt*idz2*(T[xSt:xEn, ySt:yEn, zSt-1:zEn-1] + T[xSt:xEn, ySt:yEn, zSt+1:zEn+1])) 
 
         data_transfer(T)
 
         imposeTBCs(T)
 
-        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] - (T[bn:en, 1:Ny-1, 1:Nz-1] - 0.5*kappa*dt*(
-                        (T[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
-                        (T[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 2:Ny, 1:Nz-1])/hy2 +
-                        (T[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*T[bn:en, 1:Ny-1, 1:Nz-1] + T[bn:en, 1:Ny-1, 2:Nz])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[xSt:xEn, ySt:yEn, zSt:zEn] - (T[xSt:xEn, ySt:yEn, zSt:zEn] - 0.5*kappa*dt*(
+                        (T[xSt-1:xEn-1, ySt:yEn, zSt:zEn] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt+1:xEn+1, ySt:yEn, zSt:zEn])/hx2 +
+                        (T[xSt:xEn, ySt-1:yEn-1, zSt:zEn] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt:xEn, ySt+1:yEn+1, zSt:zEn])/hy2 +
+                        (T[xSt:xEn, ySt:yEn, zSt-1:zEn-1] - 2.0*T[xSt:xEn, ySt:yEn, zSt:zEn] + T[xSt:xEn, ySt:yEn, zSt+1:zEn+1])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < VpTolerance:
-            #print(jCnt)
             break
     
         jCnt += 1
@@ -357,8 +363,7 @@ def TJacobi(rho):
             print("ERROR: Jacobi not converging in T. Aborting")
             quit()
     
-    return T[bn:en, 1:Ny-1, 1:Nz-1]       
-
+    return T[xSt:xEn, ySt:yEn, zSt:zEn]       
 
 
 def PoissonSolver(rho):
@@ -367,35 +372,23 @@ def PoissonSolver(rho):
     
     while True:
     
-        '''
-        Ppp = Pp.copy()
-        for i in range(1,Nx-1):
-            for j in range(1,Ny-1):
-                for k in range(1,Nz-1):
-                    Pp[i,j,k] = (1.0-gssor)*Ppp[i,j,k] + (gssor/(-2.0*(idx2 + idy2 + idz2))) * (rho[i, j, k] - 
-                                       idx2*(Pp[i+1, j, k] + Pp[i-1, j, k]) -
-                                       idy2*(Pp[i, j+1, k] + Pp[i, j-1, k]) -
-                                       idz2*(Pp[i, j, k+1] + Pp[i, j, k-1]))
-        '''
-            
-        Pp[bn:en, 1:Ny-1, 1:Nz-1] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[bn:en, 1:Ny-1, 1:Nz-1] - 
-                                       idx2*(Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1]) -
-                                       idy2*(Pp[bn:en, 0:Ny-2, 1:Nz-1] + Pp[bn:en, 2:Ny, 1:Nz-1]) -
-                                       idz2*(Pp[bn:en, 1:Ny-1, 0:Nz-2] + Pp[bn:en, 1:Ny-1, 2:Nz]))   
+        Pp[xSt:xEn, ySt:yEn, zSt:zEn] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[xSt:xEn, ySt:yEn, zSt:zEn] - 
+                                       idx2*(Pp[xSt-1:xEn-1, ySt:yEn, zSt:zEn] + Pp[xSt+1:xEn+1, ySt:yEn, zSt:zEn]) -
+                                       idy2*(Pp[xSt:xEn, ySt-1:yEn-1, zSt:zEn] + Pp[xSt:xEn, ySt+1:yEn+1, zSt:zEn]) -
+                                       idz2*(Pp[xSt:xEn, ySt:yEn, zSt-1:zEn-1] + Pp[xSt:xEn, ySt:yEn, zSt+1:zEn+1]))   
 
         data_transfer(Pp)
 
         imposePpBCs(Pp)
     
-        locmaxErr = np.amax(np.fabs(rho[bn:en, 1:Ny-1, 1:Nz-1] -((
-                        (Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1])/hx2 +
-                        (Pp[bn:en, 0:Ny-2, 1:Nz-1] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 2:Ny, 1:Nz-1])/hy2 +
-                        (Pp[bn:en, 1:Ny-1, 0:Nz-2] - 2.0*Pp[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 1:Ny-1, 2:Nz])/hz2))))
+        locmaxErr = np.amax(np.fabs(rho[xSt:xEn, ySt:yEn, zSt:zEn] -((
+                        (Pp[xSt-1:xEn-1, ySt:yEn, zSt:zEn] - 2.0*Pp[xSt:xEn, ySt:yEn, zSt:zEn] + Pp[xSt+1:xEn+1, ySt:yEn, zSt:zEn])/hx2 +
+                        (Pp[xSt:xEn, ySt-1:yEn-1, zSt:zEn] - 2.0*Pp[xSt:xEn, ySt:yEn, zSt:zEn] + Pp[xSt:xEn, ySt+1:yEn+1, zSt:zEn])/hy2 +
+                        (Pp[xSt:xEn, ySt:yEn, zSt-1:zEn-1] - 2.0*Pp[xSt:xEn, ySt:yEn, zSt:zEn] + Pp[xSt:xEn, ySt:yEn, zSt+1:zEn+1])/hz2))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < PoissonTolerance:
-            #print(jCnt)
             break
     
         jCnt += 1
@@ -403,7 +396,7 @@ def PoissonSolver(rho):
             print("ERROR: Poisson solver not converging. Aborting")
             quit()
     
-    return Pp[bn:en, 1:Ny-1, 1:Nz-1]     
+    return Pp[xSt:xEn, ySt:yEn, zSt:zEn]     
 
 
 
@@ -438,85 +431,84 @@ def imposePpBCs(Pp):
     Pp[:, :, 0], Pp[:, :, -1] = 0.0, 0.0 #Pp[:, :, 1], P[:, :, -2]
 
 
-iCnt = 1
-time = 0
+def main():
+    iCnt = 1
+    time = 0
 
-while True:
+    while True:
 
-    t1 = datetime.now()
+        t1 = datetime.now()
 
-    if iCnt % opInt == 0:
+        if iCnt % opInt == 0:
+            locU = np.sum(np.sqrt(U[kbn:ken, ySt:yEn, zSt:zEn]**2.0 + V[kbn:ken, ySt:yEn, zSt:zEn]**2.0 + W[kbn:ken, ySt:yEn, zSt:zEn]**2.0))
+            globU = comm.reduce(locU, op=MPI.SUM, root=0)
+        
+            locWT = np.sum(W[kbn:ken, ySt:yEn, zSt:zEn]*T[kbn:ken, ySt:yEn, zSt:zEn])
+            totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
-        locU = np.sum(np.sqrt(U[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + V[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0 + W[kbn:ken, 1:Ny-1, 1:Nz-1]**2.0))
-        globU = comm.reduce(locU, op=MPI.SUM, root=0)
-    
-        #locWT = np.sum(W[kbn:ken, :, :]*T[kbn:ken, :, :])
-        locWT = np.sum(W[kbn:ken, 1:Ny-1, 1:Nz-1]*T[kbn:ken, 1:Ny-1, 1:Nz-1])
-        totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
+            maxDiv = getDiv(U, V, W)
 
-        maxDiv = getDiv(U, V, W)
-
-        if rootRank:
-            Re = globU/(nu*Nx*Ny*Nz)
-            Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
-            print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+            if rootRank:
+                Re = globU/(nu*Nx*Ny*Nz)
+                Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
+                print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
 
-    Hx[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_X(U, V, W)
-    Hy[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_Y(U, V, W)
-    Hz[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_Z(U, V, W)
-    Ht[bn:en, 1:Ny-1, 1:Nz-1] = computeNLinDiff_T(U, V, W, T)  
+        Hx[xSt:xEn, ySt:yEn, zSt:zEn] = computeNLinDiff_X(U, V, W)
+        Hy[xSt:xEn, ySt:yEn, zSt:zEn] = computeNLinDiff_Y(U, V, W)
+        Hz[xSt:xEn, ySt:yEn, zSt:zEn] = computeNLinDiff_Z(U, V, W)
+        Ht[xSt:xEn, ySt:yEn, zSt:zEn] = computeNLinDiff_T(U, V, W, T)  
 
-    Hx[bn:en, 1:Ny-1, 1:Nz-1] = U[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hx[bn:en, 1:Ny-1, 1:Nz-1] - np.sqrt((Ta*Pr)/Ra)*(-V[bn:en, 1:Ny-1, 1:Nz-1]) - (P[bn+1:en+1, 1:Ny-1, 1:Nz-1] - P[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx))
-    uJacobi(Hx)
+        Hx[xSt:xEn, ySt:yEn, zSt:zEn] = U[xSt:xEn, ySt:yEn, zSt:zEn] + dt*(Hx[xSt:xEn, ySt:yEn, zSt:zEn] - np.sqrt((Ta*Pr)/Ra)*(-V[xSt:xEn, ySt:yEn, zSt:zEn]) - (P[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - P[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx))
+        uJacobi(Hx)
 
-    Hy[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hy[bn:en, 1:Ny-1, 1:Nz-1] - np.sqrt((Ta*Pr)/Ra)*(U[bn:en, 1:Ny-1, 1:Nz-1]) - (P[bn:en, 2:Ny, 1:Nz-1] - P[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy))
-    vJacobi(Hy)
+        Hy[xSt:xEn, ySt:yEn, zSt:zEn] = V[xSt:xEn, ySt:yEn, zSt:zEn] + dt*(Hy[xSt:xEn, ySt:yEn, zSt:zEn] - np.sqrt((Ta*Pr)/Ra)*(U[xSt:xEn, ySt:yEn, zSt:zEn]) - (P[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - P[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy))
+        vJacobi(Hy)
 
-    Hz[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] + dt*(Hz[bn:en, 1:Ny-1, 1:Nz-1] - ((P[bn:en, 1:Ny-1, 2:Nz] - P[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)) + T[bn:en, 1:Ny-1, 1:Nz-1])
-    wJacobi(Hz)
+        Hz[xSt:xEn, ySt:yEn, zSt:zEn] = W[xSt:xEn, ySt:yEn, zSt:zEn] + dt*(Hz[xSt:xEn, ySt:yEn, zSt:zEn] - ((P[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - P[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz)) + T[xSt:xEn, ySt:yEn, zSt:zEn])
+        wJacobi(Hz)
 
-    Ht[bn:en, 1:Ny-1, 1:Nz-1] = T[bn:en, 1:Ny-1, 1:Nz-1] + dt*Ht[bn:en, 1:Ny-1, 1:Nz-1]
-    TJacobi(Ht)   
+        Ht[xSt:xEn, ySt:yEn, zSt:zEn] = T[xSt:xEn, ySt:yEn, zSt:zEn] + dt*Ht[xSt:xEn, ySt:yEn, zSt:zEn]
+        TJacobi(Ht)   
 
-    rhs = np.zeros([Nx, Ny, Nz])
+        rhs = np.zeros([Nx, Ny, Nz])
 
-    rhs[bn:en, 1:Ny-1, 1:Nz-1] = ((U[bn+1:en+1, 1:Ny-1, 1:Nz-1] - U[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx) +
-                                (V[bn:en, 2:Ny, 1:Nz-1] - V[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy) +
-                                (W[bn:en, 1:Ny-1, 2:Nz] - W[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz))/dt
+        rhs[xSt:xEn, ySt:yEn, zSt:zEn] = ((U[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - U[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx) +
+                                          (V[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - V[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy) +
+                                          (W[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - W[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz))/dt
 
-    tp1 = datetime.now()
-    Pp[bn:en, 1:Ny-1, 1:Nz-1] = PoissonSolver(rhs)
-    tp2 = datetime.now()
-    #print(tp2-tp1)
+        tp1 = datetime.now()
+        Pp[xSt:xEn, ySt:yEn, zSt:zEn] = PoissonSolver(rhs)
+        tp2 = datetime.now()
+        #print(tp2-tp1)
 
-    P[bn:en, 1:Ny-1, 1:Nz-1] = P[bn:en, 1:Ny-1, 1:Nz-1] + Pp[bn:en, 1:Ny-1, 1:Nz-1]
+        P[xSt:xEn, ySt:yEn, zSt:zEn] = P[xSt:xEn, ySt:yEn, zSt:zEn] + Pp[xSt:xEn, ySt:yEn, zSt:zEn]
 
-    U[bn:en, 1:Ny-1, 1:Nz-1] = U[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn+1:en+1, 1:Ny-1, 1:Nz-1] - Pp[bn-1:en-1, 1:Ny-1, 1:Nz-1])/(2.0*hx)
-    V[bn:en, 1:Ny-1, 1:Nz-1] = V[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 2:Ny, 1:Nz-1] - Pp[bn:en, 0:Ny-2, 1:Nz-1])/(2.0*hy)
-    W[bn:en, 1:Ny-1, 1:Nz-1] = W[bn:en, 1:Ny-1, 1:Nz-1] - dt*(Pp[bn:en, 1:Ny-1, 2:Nz] - Pp[bn:en, 1:Ny-1, 0:Nz-2])/(2.0*hz)
+        U[xSt:xEn, ySt:yEn, zSt:zEn] = U[xSt:xEn, ySt:yEn, zSt:zEn] - dt*(Pp[xSt+1:xEn+1, ySt:yEn, zSt:zEn] - Pp[xSt-1:xEn-1, ySt:yEn, zSt:zEn])/(2.0*hx)
+        V[xSt:xEn, ySt:yEn, zSt:zEn] = V[xSt:xEn, ySt:yEn, zSt:zEn] - dt*(Pp[xSt:xEn, ySt+1:yEn+1, zSt:zEn] - Pp[xSt:xEn, ySt-1:yEn-1, zSt:zEn])/(2.0*hy)
+        W[xSt:xEn, ySt:yEn, zSt:zEn] = W[xSt:xEn, ySt:yEn, zSt:zEn] - dt*(Pp[xSt:xEn, ySt:yEn, zSt+1:zEn+1] - Pp[xSt:xEn, ySt:yEn, zSt-1:zEn-1])/(2.0*hz)
 
-    data_transfer(U)
-    data_transfer(V)
-    data_transfer(W)
-    data_transfer(T)
-    data_transfer(P)
+        data_transfer(U)
+        data_transfer(V)
+        data_transfer(W)
+        data_transfer(T)
+        data_transfer(P)
 
-    imposeUBCs(U)                               
-    imposeVBCs(V)                               
-    imposeWBCs(W)                               
-    imposePBCs(P)                               
-    imposeTBCs(T)           
+        imposeUBCs(U)                               
+        imposeVBCs(V)                               
+        imposeWBCs(W)                               
+        imposePBCs(P)                               
+        imposeTBCs(T)           
 
-    if time > tMax:
-        break   
+        if time > tMax:
+            break   
 
-    time = time + dt
+        time = time + dt
 
-    iCnt = iCnt + 1
+        iCnt = iCnt + 1
 
-    t2 = datetime.now()
+        t2 = datetime.now()
 
-    #print("Time taken in one time step marching=",t2-t1)
+        #print("Time taken in one time step marching=",t2-t1)
 
-#main()
+main()
