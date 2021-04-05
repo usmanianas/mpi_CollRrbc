@@ -7,13 +7,13 @@ import h5py as hp
 
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 16, 16, 16
+Nx, Ny, Nz = 32, 32, 32
 
-hx, hy, hz = Lx/(Nx-1), Ly/(Ny-1), Lz/(Nz-1)
+hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
 
-x = np.linspace(0, Lx, Nx, endpoint=True)        
-y = np.linspace(0, Ly, Ny, endpoint=True)
-z = np.linspace(0, Lz, Nz, endpoint=True)    
+x = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
+y = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
+z = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
 
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
@@ -27,7 +27,7 @@ comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 nprocs = comm.Get_size()
 
-locNx = int(Nx/nprocs) + 1
+locNx = int(Nx/nprocs)
 xSize = locNx + 2
 
 rootRank = rank == 0
@@ -42,13 +42,9 @@ xEn, yEn, zEn = locNx+1, Ny-1, Nz-1
 
 if frstRank:
     lftRank = MPI.PROC_NULL
-    xSize = locNx + 1
-    xEn = locNx
 
 if lastRank:
     rgtRank = MPI.PROC_NULL
-    xSize = locNx + 1
-    xEn = locNx
 
 x0 = slice(xSt, xEn)
 xm1 = slice(xSt-1, xEn-1)
@@ -73,14 +69,14 @@ print('#', rank, xSt, xEn, xSize)
 ############# Fields Initialization ###########
 
 # Field variables
-U = np.zeros([xSize, Ny, Nz])
-V = np.zeros([xSize, Ny, Nz])
-W = np.zeros([xSize, Ny, Nz])
-T = np.zeros([xSize, Ny, Nz])
-P = np.zeros([xSize, Ny, Nz])
+U = np.zeros([xSize, Ny+2, Nz+2])
+V = np.zeros([xSize, Ny+2, Nz+2])
+W = np.zeros([xSize, Ny+2, Nz+2])
+T = np.zeros([xSize, Ny+2, Nz+2])
+P = np.zeros([xSize, Ny+2, Nz+2])
 
 # Auxilliary variables
-Pp = np.zeros([xSize, Ny, Nz])
+Pp = np.zeros([xSize, Ny+2, Nz+2])
 
 # RHS Terms
 Hx = np.zeros_like(U)
@@ -91,7 +87,7 @@ Pp = np.zeros_like(P)
 
 # Initialize values
 P.fill(1.0)
-T[:, :, 0:Nz] = 1 - z[0:Nz]
+T[:, :, :] = 1 - z[:]
 
 ###############################################
 
@@ -114,7 +110,7 @@ if rootRank:
 dt = 0.01
 
 # Final time
-tMax = 0.2
+tMax = 1.0
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
@@ -132,7 +128,7 @@ PoissonTolerance = 1.0e-3
 gssor = 1.6
 
 # Maximum iterations for iterative solvers
-maxCount = 50
+maxCount = 1000
 
 if rootRank:
     print('# Tolerance', VpTolerance, PoissonTolerance)
@@ -247,7 +243,7 @@ def uJacobi(rho):
     jCnt = 0
     while True:
 
-        U[x0, y0, z0] =(1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
+        U[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(U[xm1, y0, z0] + U[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(U[x0, ym1, z0] + U[x0, yp1, z0]) +
                                        0.5*nu*dt*idz2*(U[x0, y0, zm1] + U[x0, y0, zp1]))          
@@ -278,11 +274,10 @@ def vJacobi(rho):
     jCnt = 0
     while True:
 
-        V[x0, y0, z0] =(1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
+        V[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(V[xm1, y0, z0] + V[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(V[x0, ym1, z0] + V[x0, yp1, z0]) +
                                        0.5*nu*dt*idz2*(V[x0, y0, zm1] + V[x0, y0, zp1]))  
-
 
         imposeVBCs(V)
 
@@ -309,7 +304,7 @@ def wJacobi(rho):
     jCnt = 0
     while True:
 
-        W[x0, y0, z0] =(1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
+        W[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(W[xm1, y0, z0] + W[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(W[x0, ym1, z0] + W[x0, yp1, z0]) +
                                        0.5*nu*dt*idz2*(W[x0, y0, zm1] + W[x0, y0, zp1]))         
@@ -338,8 +333,7 @@ def TJacobi(rho):
         
     jCnt = 0
     while True:
-
-        T[x0, y0, z0] =(1.0/(1 + kappa*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
+        T[x0, y0, z0] = (1.0/(1 + kappa*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*kappa*dt*idx2*(T[xm1, y0, z0] + T[xp1, y0, z0]) +
                                        0.5*kappa*dt*idy2*(T[x0, ym1, z0] + T[x0, yp1, z0]) +
                                        0.5*kappa*dt*idz2*(T[x0, y0, zm1] + T[x0, y0, zp1])) 
@@ -397,36 +391,36 @@ def imposeUBCs(U):
     data_transfer(U)
 
     if frstRank:
-        U[0, :, :] = 0.0
+        U[0, :, :] = -U[1, :, :]
     if lastRank:
-        U[-1, :, :] = 0.0
+        U[-1, :, :] = -U[-2, :, :]
 
-    U[:, 0, :], U[:, -1, :] = 0.0, 0.0
-    U[:, :, 0], U[:, :, -1] = 0.0, 0.0
+    U[:, 0, :], U[:, -1, :] = -U[:, 1, :], -U[:, -2, :]
+    U[:, :, 0], U[:, :, -1] = -U[:, :, 1], -U[:, :, -2]
 
 
 def imposeVBCs(V):
     data_transfer(V)
 
     if frstRank:
-        V[0, :, :] = 0.0
+        V[0, :, :] = -V[1, :, :]
     if lastRank:
-        V[-1, :, :] = 0.0
+        V[-1, :, :] = -V[-2, :, :]
 
-    V[:, 0, :], V[:, -1, :] = 0.0, 0.0  
-    V[:, :, 0], V[:, :, -1] = 0.0, 0.0
+    V[:, 0, :], V[:, -1, :] = -V[:, 1, :], -V[:, -2, :]  
+    V[:, :, 0], V[:, :, -1] = -V[:, :, 1], -V[:, :, -2]
 
 
 def imposeWBCs(W):
     data_transfer(W)
     
     if frstRank:
-        W[0, :, :] = 0.0
+        W[0, :, :] = -W[1, :, :]
     if lastRank:
-        W[-1, :, :] = 0.0
+        W[-1, :, :] = -W[-2, :, :]
 
-    W[:, 0, :], W[:, -1, :] = 0.0, 0.0
-    W[:, :, 0], W[:, :, -1] = 0.0, 0.0  
+    W[:, 0, :], W[:, -1, :] = -W[:, 1, :], -W[:, -2, :]
+    W[:, :, 0], W[:, :, -1] = -W[:, :, 1], -W[:, :, -2]  
 
 
 def imposeTBCs(T):
@@ -438,7 +432,7 @@ def imposeTBCs(T):
         T[-1, :, :] = T[-2, :, :]
 
     T[:, 0, :], T[:, -1, :] = T[:, 1, :], T[:, -2, :]
-    T[:, :, 0], T[:, :, -1] = 1.0, 0.0
+    T[:, :, 0], T[:, :, -1] = 2.0 - T[:, :, 1], -T[:, :, -2]
 
 
 def imposePBCs(P):
@@ -457,19 +451,19 @@ def imposePpBCs(Pp):
     data_transfer(Pp)
 
     if frstRank:
-        Pp[0, :, :] = 0.0   #Pp[1, :, :]
+        Pp[0, :, :] = Pp[1, :, :]
     if lastRank:
-        Pp[-1, :, :] = 0.0  #Pp[-2, :, :]
+        Pp[-1, :, :] = Pp[-2, :, :]
 
-    Pp[:, 0, :], Pp[:, -1, :] = 0.0, 0.0 #Pp[:, 1, :], Pp[:, -2, :]
-    Pp[:, :, 0], Pp[:, :, -1] = 0.0, 0.0 #Pp[:, :, 1], P[:, :, -2]
+    Pp[:, 0, :], Pp[:, -1, :] = Pp[:, 1, :], Pp[:, -2, :]
+    Pp[:, :, 0], Pp[:, :, -1] = Pp[:, :, 1], Pp[:, :, -2]
 
 
 def main():
     iCnt = 1
     time = 0
 
-    rhs = np.zeros([xSize, Ny, Nz])
+    rhs = np.zeros([xSize, Ny+2, Nz+2])
 
     t1 = datetime.now()
 
@@ -510,6 +504,13 @@ def main():
         rhs[x0, y0, z0] = ((U[xp1, y0, z0] - U[xm1, y0, z0])/(2.0*hx) +
                            (V[x0, yp1, z0] - V[x0, ym1, z0])/(2.0*hy) +
                            (W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))/dt
+
+        #if rank == 0:
+            #print(rhs[:, 1, 1])
+
+        #if rank == 1:
+        #    print(rhs[:, 1, 1])
+        #exit(0)
 
         Pp[x0, y0, z0] = PoissonSolver(rhs)
 
