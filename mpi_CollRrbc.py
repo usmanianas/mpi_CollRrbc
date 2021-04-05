@@ -5,9 +5,18 @@ import h5py as hp
 
 ############### Grid Parameters ###############
 
+# Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
+# Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
+# Grid sizes: 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384
+sInd = np.array([6, 6, 6])
+
+# N should be of the form 2^n
+# Then there will be 2^n + 2 points in total, including 2 ghost points
+sLst = [2**x for x in range(12)]
+
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = 32, 32, 32
+Nx, Ny, Nz = sLst[sInd[0]], sLst[sInd[1]], sLst[sInd[2]]
 
 hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
 
@@ -18,6 +27,63 @@ z = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
 idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
+
+# Depth of each V-cycle in multigrid
+VDepth = min(sInd) - 1
+
+# Number of V-cycles to be computed
+vcCnt = 10
+
+# Number of iterations during pre-smoothing
+preSm = 3
+
+# Number of iterations during post-smoothing
+pstSm = 3
+
+# Tolerance value for iterative solver
+tolerance = 1.0e-6
+
+# Get array of grid sizes are tuples corresponding to each level of V-Cycle
+N = [(sLst[x[0]], sLst[x[1]], sLst[x[2]]) for x in [sInd - y for y in range(VDepth + 1)]]
+
+# Define array of grid spacings along X
+mghx = [hx*(2**x) for x in range(VDepth+1)]
+
+# Define array of grid spacings along Y
+mghy = [hy*(2**x) for x in range(VDepth+1)]
+
+# Define array of grid spacings along Z
+mghz = [hz*(2**x) for x in range(VDepth+1)]
+
+# Square of mghx, used in finite difference formulae
+mghx2 = [x*x for x in mghx]
+
+# Square of mghy, used in finite difference formulae
+mghy2 = [x*x for x in mghy]
+
+# Square of mghz, used in finite difference formulae
+mghz2 = [x*x for x in mghz]
+
+# Cross product of mghy and mghz, used in finite difference formulae
+hyhz = [mghy2[i]*mghz2[i] for i in range(VDepth + 1)]
+
+# Cross product of mghx and mghz, used in finite difference formulae
+hzhx = [mghx2[i]*mghz2[i] for i in range(VDepth + 1)]
+
+# Cross product of mghx and mghy, used in finite difference formulae
+hxhy = [mghx2[i]*mghy2[i] for i in range(VDepth + 1)]
+
+# Cross product of mghx, mghy and mghz used in finite difference formulae
+hxhyhz = [mghx2[i]*mghy2[i]*mghz2[i] for i in range(VDepth + 1)]
+
+# Factor in denominator of Gauss-Seidel iterations
+gsFactor = [1.0/(2.0*(hyhz[i] + hzhx[i] + hxhy[i])) for i in range(VDepth + 1)]
+
+# Maximum number of iterations while solving at coarsest level
+maxCountPp = 10*N[-1][0]*N[-1][1]*N[-1][2]
+
+# Integer specifying the level of V-cycle at any point while solving
+vLev = 0
 
 ###############################################
 
@@ -38,7 +104,7 @@ lftRank = rank - 1
 rgtRank = rank + 1
 
 xSt, ySt, zSt = 1, 1, 1
-xEn, yEn, zEn = locNx+1, Ny-1, Nz-1
+xEn, yEn, zEn = locNx+1, Ny+1, Nz+1
 
 if frstRank:
     lftRank = MPI.PROC_NULL
@@ -110,7 +176,7 @@ if rootRank:
 dt = 0.01
 
 # Final time
-tMax = 1.0
+tMax = 0.1
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
@@ -122,7 +188,7 @@ fwInt = 2
 VpTolerance = 1.0e-5
 
 # Tolerance value in Poisson iterations
-PoissonTolerance = 1.0e-3
+PoissonTolerance = 1.0e-6
 
 # Omega for SOR
 gssor = 1.6
@@ -130,16 +196,13 @@ gssor = 1.6
 # Maximum iterations for iterative solvers
 maxCount = 1000
 
-if rootRank:
-    print('# Tolerance', VpTolerance, PoissonTolerance)
-
 ###############################################
 
 
 def writeSoln(U, V, W, P, T, time):
-
     fName = "Soln_{0:09.5f}.h5".format(time)
     print("#Writing solution file: ", fName)        
+
     f = hp.File(fName, "w")
 
     dset = f.create_dataset("U", data = U)
@@ -152,7 +215,6 @@ def writeSoln(U, V, W, P, T, time):
 
 
 def getDiv(U, V, W):
-
     divMat = ((U[xp1, y0, z0] - U[xm1, y0, z0])*0.5/hx +
               (V[x0, yp1, z0] - V[x0, ym1, z0])*0.5/hy +
               (W[x0, y0, zp1] - W[x0, y0, zm1])*0.5/hz)
@@ -239,7 +301,6 @@ def computeNLinDiff_T(U, V, W, T):
 
 
 def uJacobi(rho):
-
     jCnt = 0
     while True:
 
@@ -254,7 +315,6 @@ def uJacobi(rho):
                             (U[xm1, y0, z0] - 2.0*U[x0, y0, z0] + U[xp1, y0, z0])/hx2 +
                             (U[x0, ym1, z0] - 2.0*U[x0, y0, z0] + U[x0, yp1, z0])/hy2 +
                             (U[x0, y0, zm1] - 2.0*U[x0, y0, z0] + U[x0, y0, zp1])/hz2))))
-        
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -270,7 +330,6 @@ def uJacobi(rho):
 
 
 def vJacobi(rho):
-        
     jCnt = 0
     while True:
 
@@ -300,7 +359,6 @@ def vJacobi(rho):
 
 
 def wJacobi(rho):
-        
     jCnt = 0
     while True:
 
@@ -330,7 +388,6 @@ def wJacobi(rho):
 
 
 def TJacobi(rho):
-        
     jCnt = 0
     while True:
         T[x0, y0, z0] = (1.0/(1 + kappa*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
@@ -356,6 +413,222 @@ def TJacobi(rho):
             quit()
     
     return T[x0, y0, z0]       
+
+
+############### Multigrid Solver ###############
+
+# The root function of MG-solver. And H is the RHS
+def multigrid(H):
+    global N
+    global vcCnt
+    global tolerance
+    global pData, rData
+
+    rData[0] = H
+    chMat = np.zeros(N[0])
+
+    for i in range(vcCnt):
+        v_cycle()
+
+        chMat = laplace(pData[0])
+        locmaxRes = np.amax(np.abs(H[1:-1, 1:-1, 1:-1] - chMat[1:-1, 1:-1, 1:-1]))
+        totmaxRes = comm.allreduce(locmaxRes, op=MPI.MAX)
+        if totmaxRes < tolerance:
+            break
+
+    return pData[0]
+
+
+# Multigrid V-cycle without the use of recursion
+def v_cycle():
+    global vLev
+    global VDepth
+    global pstSm, preSm
+
+    vLev = 0
+
+    # Pre-smoothing
+    smooth(preSm)
+
+    for i in range(VDepth):
+        # Compute residual
+        calcResidual()
+
+        # Copy smoothed pressure for later use
+        sData[vLev] = np.copy(pData[vLev])
+
+        # Restrict to coarser level
+        restrict()
+
+        # Reinitialize pressure at coarser level to 0 - this is critical!
+        pData[vLev].fill(0.0)
+
+        # If the coarsest level is reached, solve. Otherwise, keep smoothing!
+        if vLev == VDepth:
+            #solve()
+            smooth(preSm)
+        else:
+            smooth(preSm)
+
+    # Prolongation operations
+    for i in range(VDepth):
+        # Prolong pressure to next finer level
+        prolong()
+
+        # Add previously stored smoothed data
+        pData[vLev] += sData[vLev]
+
+        # Post-smoothing
+        smooth(pstSm)
+
+
+# Smoothens the solution sCount times using Gauss-Seidel smoother
+def smooth(sCount):
+    global N
+    global vLev
+    global gsFactor
+    global rData, pData
+    global hyhz, hzhx, hxhy, hxhyhz
+
+    n = N[vLev]
+    for iCnt in range(sCount):
+        imposePpBCs(pData[vLev])
+
+        # Gauss-Seidel smoothing
+        for i in range(1, n[0]+1):
+            for j in range(1, n[1]+1):
+                for k in range(1, n[2]+1):
+                    pData[vLev][i, j, k] = (hyhz[vLev]*(pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
+                                            hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
+                                            hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
+                                          hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
+
+    imposePpBCs(pData[vLev])
+
+
+# Compute the residual and store it into iTemp array
+def calcResidual():
+    global vLev
+    global iTemp, rData, pData
+
+    iTemp[vLev].fill(0.0)
+    iTemp[vLev] = rData[vLev] - laplace(pData[vLev])
+
+
+# Restricts the data from an array of size 2^n to a smaller array of size 2^(n - 1)
+def restrict():
+    global N
+    global vLev
+    global iTemp, rData
+
+    pLev = vLev
+    vLev += 1
+
+    n = N[vLev]
+    rData[vLev][1:-1, 1:-1, 1:-1] = (iTemp[pLev][1:-1:2, 1:-1:2, 1:-1:2] + iTemp[pLev][2::2, 2::2, 2::2] +
+                                     iTemp[pLev][1:-1:2, 1:-1:2, 2::2] + iTemp[pLev][2::2, 2::2, 1:-1:2] +
+                                     iTemp[pLev][1:-1:2, 2::2, 1:-1:2] + iTemp[pLev][2::2, 1:-1:2, 2::2] +
+                                     iTemp[pLev][2::2, 1:-1:2, 1:-1:2] + iTemp[pLev][1:-1:2, 2::2, 2::2])/8
+
+
+# Solves at coarsest level using the Gauss-Seidel iterative solver
+def solve():
+    global N, vLev
+    global gsFactor
+    global tolerance
+    global maxCountPp
+    global pData, rData
+    global hyhz, hzhx, hxhy, hxhyhz
+
+    n = N[vLev]
+    solLap = np.zeros(n)
+
+    jCnt = 0
+    while True:
+        if rootRank:
+            print("Before ", pData[vLev][:,:5,5])
+        imposePpBCs(pData[vLev])
+        if rootRank:
+            print("After ", pData[vLev][:,:5,5])
+
+        # Gauss-Seidel iterative solver
+        for i in range(1, n[0]+1):
+            for j in range(1, n[1]+1):
+                for k in range(1, n[2]+1):
+                    pData[vLev][i, j, k] = (hyhz[vLev]*(pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
+                                            hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
+                                            hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
+                                          hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
+
+        locmaxErr = np.amax(np.abs(rData[vLev] - laplace(pData[vLev]))[1:-1, 1:-1, 1:-1])
+        totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
+
+        if totmaxErr < tolerance:
+            break
+
+        jCnt += 1
+        if jCnt > maxCountPp:
+            print("ERROR: Jacobi not converging. Aborting")
+            quit()
+
+    exit()
+    imposePpBCs(pData[vLev])
+
+
+# Interpolates the data from an array of size 2^n to a larger array of size 2^(n + 1)
+def prolong():
+    global N
+    global vLev
+    global pData
+
+    pLev = vLev
+    vLev -= 1
+
+    n = N[vLev]
+    for i in range(1, n[0] + 1):
+        i2 = int((i-1)/2) + 1
+        for j in range(1, n[1] + 1):
+            j2 = int((j-1)/2) + 1
+            for k in range(1, n[2] + 1):
+                k2 = int((k-1)/2) + 1
+                pData[vLev][i, j, k] = pData[pLev][i2, j2, k2]
+
+
+# Computes the 3D laplacian of function
+def laplace(function):
+    global vLev
+    global mghx2, mghy2, mghz2
+
+    laplacian = np.zeros_like(function)
+    laplacian[1:-1, 1:-1, 1:-1] = ((function[:-2, 1:-1, 1:-1] - 2.0*function[1:-1, 1:-1, 1:-1] + function[2:, 1:-1, 1:-1])/mghx2[vLev] + 
+                                   (function[1:-1, :-2, 1:-1] - 2.0*function[1:-1, 1:-1, 1:-1] + function[1:-1, 2:, 1:-1])/mghy2[vLev] +
+                                   (function[1:-1, 1:-1, :-2] - 2.0*function[1:-1, 1:-1, 1:-1] + function[1:-1, 1:-1, 2:])/mghz2[vLev])
+
+    return laplacian
+
+
+def initMGArrays():
+    global N
+    global sInd, sLst, VDepth
+    global pData, rData, sData, iTemp
+
+    # Update VDepth according to number of procs
+    VDepth = min(min(sInd), sLst.index(int(Nx/nprocs))) - 1
+
+    # Update List of grid sizes accordingly
+    N = [(sLst[x[0]], sLst[x[1]], sLst[x[2]]) for x in [sInd - y for y in range(VDepth + 1)]]
+    N = [(int(x[0]/nprocs), x[1], x[2]) for x in N]
+
+    # Finally update max iterations variable
+    maxCountPp = 10*N[-1][0]*N[-1][1]*N[-1][2]
+
+    nList = np.array(N)
+
+    pData = [np.zeros(tuple(x)) for x in nList + 2]
+
+    rData = [np.zeros_like(x) for x in pData]
+    sData = [np.zeros_like(x) for x in pData]
+    iTemp = [np.zeros_like(x) for x in pData]
 
 
 def PoissonSolver(rho):
@@ -385,6 +658,9 @@ def PoissonSolver(rho):
             quit()
     
     return Pp[x0, y0, z0]     
+
+
+############### Boundary Conditions ###############
 
 
 def imposeUBCs(U):
@@ -463,6 +739,8 @@ def main():
     iCnt = 1
     time = 0
 
+    initMGArrays()
+
     rhs = np.zeros([xSize, Ny+2, Nz+2])
 
     t1 = datetime.now()
@@ -505,14 +783,8 @@ def main():
                            (V[x0, yp1, z0] - V[x0, ym1, z0])/(2.0*hy) +
                            (W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))/dt
 
-        #if rank == 0:
-            #print(rhs[:, 1, 1])
-
-        #if rank == 1:
-        #    print(rhs[:, 1, 1])
-        #exit(0)
-
-        Pp[x0, y0, z0] = PoissonSolver(rhs)
+        #Pp[x0, y0, z0] = PoissonSolver(rhs)
+        Pp = multigrid(rhs)
 
         P[x0, y0, z0] = P[x0, y0, z0] + Pp[x0, y0, z0]
         U[x0, y0, z0] = U[x0, y0, z0] - dt*(Pp[xp1, y0, z0] - Pp[xm1, y0, z0])/(2.0*hx)
