@@ -3,7 +3,16 @@ from mpi4py import MPI
 import numpy as np
 import h5py as hp
 
-############### Grid Parameters ###############
+############### Simulation Parameters ###############
+
+# Rayleigh Number
+Ra = 1.0e4
+
+# Prandtl Number
+Pr = 1.0
+
+# Taylor Number
+Ta = 0.0
 
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
@@ -14,22 +23,11 @@ sInd = np.array([6, 6, 6])
 # Then there will be 2^n + 2 points in total, including 2 ghost points
 sLst = [2**x for x in range(12)]
 
+# Dimensions of computational domain
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
-Nx, Ny, Nz = sLst[sInd[0]], sLst[sInd[1]], sLst[sInd[2]]
-
-hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
-
-x = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
-y = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
-z = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
-
-hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
-
-idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
-
 # Depth of each V-cycle in multigrid
-VDepth = min(sInd) - 1
+VDepth = 3
 
 # Number of V-cycles to be computed
 vcCnt = 10
@@ -42,6 +40,47 @@ pstSm = 3
 
 # Tolerance value for iterative solver
 tolerance = 1.0e-6
+
+# Time step
+dt = 0.01
+
+# Final time
+tMax = 0.1
+
+# Number of iterations at which output is sent to standard I/O
+opInt = 1
+
+# File writing interval
+fwInt = 2
+
+# Tolerance value in Jacobi iterations
+VpTolerance = 1.0e-5
+
+# Tolerance value in Poisson iterations
+PoissonTolerance = 1.0e-6
+
+# Omega for SOR
+gssor = 1.6
+
+# Maximum iterations for iterative solvers
+maxCount = 1000
+
+# Maximum number of iterations at coarsest level of multigrid solver
+maxCountPp = 1000
+
+###############################################
+
+Nx, Ny, Nz = sLst[sInd[0]], sLst[sInd[1]], sLst[sInd[2]]
+
+hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
+
+x = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
+y = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
+z = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
+
+hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
+
+idx2, idy2, idz2 = 1.0/hx2, 1.0/hy2, 1.0/hz2
 
 # Get array of grid sizes are tuples corresponding to each level of V-Cycle
 N = [(sLst[x[0]], sLst[x[1]], sLst[x[2]]) for x in [sInd - y for y in range(VDepth + 1)]]
@@ -78,9 +117,6 @@ hxhyhz = [mghx2[i]*mghy2[i]*mghz2[i] for i in range(VDepth + 1)]
 
 # Factor in denominator of Gauss-Seidel iterations
 gsFactor = [1.0/(2.0*(hyhz[i] + hzhx[i] + hxhy[i])) for i in range(VDepth + 1)]
-
-# Maximum number of iterations while solving at coarsest level
-maxCountPp = 10*N[-1][0]*N[-1][1]*N[-1][2]
 
 # Integer specifying the level of V-cycle at any point while solving
 vLev = 0
@@ -159,42 +195,10 @@ T[:, :, :] = 1 - z[:]
 
 ############### Flow Parameters ###############
 
-Ra = 1.0e4
-Pr = 1.0
-Ta = 0.0
-
 nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
 if rootRank:
     print('#', 'Ra=', Ra, 'Pr=', Pr)
-
-###############################################
-
-########### Simulation Parameters #############
-
-# Time step
-dt = 0.01
-
-# Final time
-tMax = 0.1
-
-# Number of iterations at which output is sent to standard I/O
-opInt = 1
-
-# File writing interval
-fwInt = 2
-
-# Tolerance value in Jacobi iterations
-VpTolerance = 1.0e-5
-
-# Tolerance value in Poisson iterations
-PoissonTolerance = 1.0e-6
-
-# Omega for SOR
-gssor = 1.6
-
-# Maximum iterations for iterative solvers
-maxCount = 1000
 
 ###############################################
 
@@ -465,8 +469,8 @@ def v_cycle():
 
         # If the coarsest level is reached, solve. Otherwise, keep smoothing!
         if vLev == VDepth:
-            #solve()
-            smooth(preSm)
+            solve()
+            #smooth(preSm)
         else:
             smooth(preSm)
 
@@ -545,11 +549,7 @@ def solve():
 
     jCnt = 0
     while True:
-        if rootRank:
-            print("Before ", pData[vLev][:,:5,5])
         imposePpBCs(pData[vLev])
-        if rootRank:
-            print("After ", pData[vLev][:,:5,5])
 
         # Gauss-Seidel iterative solver
         for i in range(1, n[0]+1):
@@ -571,7 +571,6 @@ def solve():
             print("ERROR: Jacobi not converging. Aborting")
             quit()
 
-    exit()
     imposePpBCs(pData[vLev])
 
 
@@ -609,18 +608,32 @@ def laplace(function):
 
 def initMGArrays():
     global N
-    global sInd, sLst, VDepth
     global pData, rData, sData, iTemp
+    global sInd, sLst, VDepth, maxCountPp
 
     # Update VDepth according to number of procs
-    VDepth = min(min(sInd), sLst.index(int(Nx/nprocs))) - 1
+    maxDepth = min(min(sInd), sLst.index(int(Nx/nprocs))) - 1
+
+    if VDepth > maxDepth:
+        if rootRank:
+            print("\nWARNING: Specified V-Cycle depth exceed maximum attainable value for grid and processor count.")
+            print("Using new VDepth value = " + str(maxDepth))
+
+        VDepth = maxDepth
 
     # Update List of grid sizes accordingly
     N = [(sLst[x[0]], sLst[x[1]], sLst[x[2]]) for x in [sInd - y for y in range(VDepth + 1)]]
     N = [(int(x[0]/nprocs), x[1], x[2]) for x in N]
 
     # Finally update max iterations variable
-    maxCountPp = 10*N[-1][0]*N[-1][1]*N[-1][2]
+    maxSolCount = 100*N[-1][0]*N[-1][1]*N[-1][2]
+
+    if maxSolCount > maxCountPp:
+        if rootRank:
+            print("\nWARNING: Maximum iteration count for Poisson solver is too low.")
+            print("Using new maximum iteration count = " + str(maxSolCount))
+
+        maxCountPp = maxSolCount
 
     nList = np.array(N)
 
