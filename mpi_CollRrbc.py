@@ -51,7 +51,7 @@ tMax = 0.5
 opInt = 1
 
 # File writing interval
-fwInt = 2
+fwInt = 10
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
@@ -142,6 +142,9 @@ rgtRank = rank + 1
 xSt, ySt, zSt = 1, 1, 1
 xEn, yEn, zEn = locNx+1, Ny+1, Nz+1
 
+gSt = rank*locNx
+gEn = (rank + 1)*locNx
+
 if frstRank:
     lftRank = MPI.PROC_NULL
 
@@ -204,16 +207,30 @@ if rootRank:
 
 
 def writeSoln(U, V, W, P, T, time):
+    global gSt, gEn
+    global rootRank
+
     fName = "Soln_{0:09.5f}.h5".format(time)
-    print("#Writing solution file: ", fName)        
+    if rootRank:
+        print("#Writing solution file: ", fName)        
 
-    f = hp.File(fName, "w")
+    f = hp.File(fName, "w", driver='mpio', comm=comm)
 
-    dset = f.create_dataset("U", data = U)
-    dset = f.create_dataset("V", data = V)
-    dset = f.create_dataset("W", data = W)
-    dset = f.create_dataset("T", data = T)
-    dset = f.create_dataset("P", data = P)
+    dShape = Nx, Ny, Nz
+
+    uDset = f.create_dataset("U", dShape, dtype = 'f')
+    vDset = f.create_dataset("V", dShape, dtype = 'f')
+    wDset = f.create_dataset("W", dShape, dtype = 'f')
+    tDset = f.create_dataset("T", dShape, dtype = 'f')
+    pDset = f.create_dataset("P", dShape, dtype = 'f')
+
+    for rCnt in range(nprocs):
+        if rCnt == rank:
+            uDset[gSt:gEn,:,:] = U[1:-1, 1:-1, 1:-1]
+            vDset[gSt:gEn,:,:] = V[1:-1, 1:-1, 1:-1]
+            wDset[gSt:gEn,:,:] = W[1:-1, 1:-1, 1:-1]
+            tDset[gSt:gEn,:,:] = T[1:-1, 1:-1, 1:-1]
+            pDset[gSt:gEn,:,:] = P[1:-1, 1:-1, 1:-1]
 
     f.close()
 
@@ -246,7 +263,6 @@ def computeNLinDiff_X(U, V, W):
     global Hx
     global hx2, hy2, hz2
     global nu, hx, hy, hz
-    global xSt, xEn, ySt, yEn, zSt, zEn
 
     Hx[x0, y0, z0] = (((U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0])/hx2 + 
                        (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0])/hy2 + 
@@ -262,7 +278,6 @@ def computeNLinDiff_Y(U, V, W):
     global Hy
     global hx2, hy2, hz2
     global nu, hx, hy, hz
-    global xSt, xEn, ySt, yEn, zSt, zEn
 
     Hy[x0, y0, z0] = (((V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0])/hx2 + 
                        (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0])/hy2 + 
@@ -278,7 +293,6 @@ def computeNLinDiff_Z(U, V, W):
     global Hz
     global hx2, hy2, hz2
     global nu, hx, hy, hz
-    global xSt, xEn, ySt, yEn, zSt, zEn
 
     Hz[x0, y0, z0] = (((W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0])/hx2 + 
                        (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0])/hy2 + 
@@ -295,7 +309,6 @@ def computeNLinDiff_T(U, V, W, T):
     global Ht
     global hx2, hy2, hz2
     global kappa, hx, hy, hz
-    global xSt, xEn, ySt, yEn, zSt, zEn
 
     Ht[x0, y0, z0] = (((T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0])/hx2 + 
                        (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0])/hy2 + 
@@ -760,7 +773,7 @@ def imposePpBCs(Pp):
 
 
 def main():
-    iCnt = 1
+    iCnt = 0
     time = 0
 
     initMGArrays()
@@ -777,6 +790,8 @@ def main():
     totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
     maxDiv = getDiv(U, V, W)
+
+    writeSoln(U, V, W, P, T, 0.0)
 
     if rootRank:
         Re = globU/(nu*Nx*Ny*Nz)
@@ -836,6 +851,9 @@ def main():
                 Re = globU/(nu*Nx*Ny*Nz)
                 Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
                 print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+
+        if iCnt % fwInt == 0:
+            writeSoln(U, V, W, P, T, time)
 
         if time + dt/2.0 > tMax:
             break   
