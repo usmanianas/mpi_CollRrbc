@@ -74,9 +74,9 @@ Nx, Ny, Nz = sLst[sInd[0]], sLst[sInd[1]], sLst[sInd[2]]
 
 hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
 
-x = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
-y = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
-z = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
+xCord = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
+yCord = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
+zCord = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
 
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
@@ -189,7 +189,7 @@ Pp = np.zeros_like(P)
 
 # Initialize values
 P.fill(1.0)
-T[:, :, :] = 1 - z[:]
+T[:, :, :] = 1 - zCord[:]
 
 ###############################################
 
@@ -232,11 +232,14 @@ def getDiv(U, V, W):
 
 def data_transfer(F):
     if nprocs > 1:
-        comm.Irecv(F[-1, :, :], source = rgtRank)
-        comm.Irecv(F[0, :, :], source = lftRank)  
+        reqRgt = comm.Irecv(F[-1, :, :], source = rgtRank)
+        reqLft = comm.Irecv(F[0, :, :], source = lftRank)  
 
         comm.Send(F[-2, :, :], dest = rgtRank)
         comm.Send(F[1, :, :], dest = lftRank)
+
+        reqRgt.wait()
+        reqLft.wait()
 
 
 def computeNLinDiff_X(U, V, W):
@@ -454,7 +457,7 @@ def v_cycle():
     # Pre-smoothing
     smooth(preSm)
 
-    for i in range(VDepth):
+    for vCnt in range(VDepth):
         # Compute residual
         calcResidual()
 
@@ -475,7 +478,7 @@ def v_cycle():
             smooth(preSm)
 
     # Prolongation operations
-    for i in range(VDepth):
+    for vCnt in range(VDepth):
         # Prolong pressure to next finer level
         prolong()
 
@@ -545,7 +548,6 @@ def solve():
     global hyhz, hzhx, hxhy, hxhyhz
 
     n = N[vLev]
-    solLap = np.zeros(n)
 
     jCnt = 0
     while True:
