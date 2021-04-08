@@ -33,10 +33,10 @@ VDepth = 3
 vcCnt = 10
 
 # Number of iterations during pre-smoothing
-preSm = 3
+preSm = 5
 
 # Number of iterations during post-smoothing
-pstSm = 3
+pstSm = 5
 
 # Tolerance value for iterative solver
 tolerance = 1.0e-6
@@ -45,7 +45,7 @@ tolerance = 1.0e-6
 dt = 0.01
 
 # Final time
-tMax = 0.1
+tMax = 0.5
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
@@ -310,7 +310,6 @@ def computeNLinDiff_T(U, V, W, T):
 def uJacobi(rho):
     jCnt = 0
     while True:
-
         U[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(U[xm1, y0, z0] + U[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(U[x0, ym1, z0] + U[x0, yp1, z0]) +
@@ -339,7 +338,6 @@ def uJacobi(rho):
 def vJacobi(rho):
     jCnt = 0
     while True:
-
         V[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(V[xm1, y0, z0] + V[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(V[x0, ym1, z0] + V[x0, yp1, z0]) +
@@ -368,7 +366,6 @@ def vJacobi(rho):
 def wJacobi(rho):
     jCnt = 0
     while True:
-
         W[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
                                        0.5*nu*dt*idx2*(W[xm1, y0, z0] + W[xp1, y0, z0]) +
                                        0.5*nu*dt*idy2*(W[x0, ym1, z0] + W[x0, yp1, z0]) +
@@ -472,8 +469,8 @@ def v_cycle():
 
         # If the coarsest level is reached, solve. Otherwise, keep smoothing!
         if vLev == VDepth:
-            solve()
-            #smooth(preSm)
+            #solve()
+            smooth(preSm)
         else:
             smooth(preSm)
 
@@ -501,6 +498,11 @@ def smooth(sCount):
     for iCnt in range(sCount):
         imposePpBCs(pData[vLev])
 
+        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
+                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
+                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
+                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
+        '''
         # Gauss-Seidel smoothing
         for i in range(1, n[0]+1):
             for j in range(1, n[1]+1):
@@ -509,6 +511,7 @@ def smooth(sCount):
                                             hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
                                             hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
                                           hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
+        '''
 
     imposePpBCs(pData[vLev])
 
@@ -553,6 +556,11 @@ def solve():
     while True:
         imposePpBCs(pData[vLev])
 
+        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
+                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
+                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
+                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
+        '''
         # Gauss-Seidel iterative solver
         for i in range(1, n[0]+1):
             for j in range(1, n[1]+1):
@@ -561,6 +569,7 @@ def solve():
                                             hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
                                             hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
                                           hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
+        '''
 
         locmaxErr = np.amax(np.abs(rData[vLev] - laplace(pData[vLev]))[1:-1, 1:-1, 1:-1])
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
@@ -760,22 +769,21 @@ def main():
 
     t1 = datetime.now()
 
+    # Write output at t = 0
+    locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
+    locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
+
+    globU = comm.reduce(locU, op=MPI.SUM, root=0)
+    totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
+
+    maxDiv = getDiv(U, V, W)
+
+    if rootRank:
+        Re = globU/(nu*Nx*Ny*Nz)
+        Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
+        print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+
     while True:
-        if iCnt % opInt == 0:
-            locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
-            locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
-
-            globU = comm.reduce(locU, op=MPI.SUM, root=0)
-            totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
-
-            maxDiv = getDiv(U, V, W)
-
-            if rootRank:
-                Re = globU/(nu*Nx*Ny*Nz)
-                Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
-                print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
-
-
         Hx[x0, y0, z0] = computeNLinDiff_X(U, V, W)
         Hy[x0, y0, z0] = computeNLinDiff_Y(U, V, W)
         Hz[x0, y0, z0] = computeNLinDiff_Z(U, V, W)
@@ -812,11 +820,25 @@ def main():
         imposePBCs(P)
         imposeTBCs(T)
 
-        if time > tMax:
-            break   
-
         iCnt = iCnt + 1
         time = time + dt
+
+        if iCnt % opInt == 0:
+            locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
+            locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
+
+            globU = comm.reduce(locU, op=MPI.SUM, root=0)
+            totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
+
+            maxDiv = getDiv(U, V, W)
+
+            if rootRank:
+                Re = globU/(nu*Nx*Ny*Nz)
+                Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
+                print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+
+        if time + dt/2.0 > tMax:
+            break   
 
     t2 = datetime.now()
 
