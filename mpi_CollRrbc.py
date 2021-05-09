@@ -9,7 +9,7 @@ import h5py as hp
 Ra = 1.0e4
 
 # Prandtl Number
-Pr = 1.0
+Pr = 0.7
 
 # Taylor Number
 Ta = 0.0
@@ -45,13 +45,13 @@ tolerance = 1.0e-6
 dt = 0.01
 
 # Final time
-tMax = 0.5
+tMax = 10.0
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
 
 # File writing interval
-fwInt = 10
+fwInt = 100
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
@@ -248,15 +248,14 @@ def getDiv(U, V, W):
 
 
 def data_transfer(F):
-    if nprocs > 1:
-        reqRgt = comm.Irecv(F[-1, :, :], source = rgtRank)
-        reqLft = comm.Irecv(F[0, :, :], source = lftRank)  
+    reqRgt = comm.Irecv(F[-1, :, :], source = rgtRank)
+    reqLft = comm.Irecv(F[0, :, :], source = lftRank)  
 
-        comm.Send(F[-2, :, :], dest = rgtRank)
-        comm.Send(F[1, :, :], dest = lftRank)
+    comm.Send(F[-2, :, :], dest = rgtRank)
+    comm.Send(F[1, :, :], dest = lftRank)
 
-        reqRgt.wait()
-        reqLft.wait()
+    reqRgt.wait()
+    reqLft.wait()
 
 
 def computeNLinDiff_X(U, V, W):
@@ -300,7 +299,6 @@ def computeNLinDiff_Z(U, V, W):
                         U[x0, y0, z0]*(W[xp1, y0, z0] - W[xm1, y0, z0])/(2.0*hx) -
                         V[x0, y0, z0]*(W[x0, yp1, z0] - W[x0, ym1, z0])/(2.0*hy) - 
                         W[x0, y0, z0]*(W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))
-
 
     return Hz[x0, y0, z0]
 
@@ -480,7 +478,7 @@ def v_cycle():
         # Reinitialize pressure at coarser level to 0 - this is critical!
         pData[vLev].fill(0.0)
 
-        # If the coarsest level is reached, solve. Otherwise, keep smoothing!
+        # If the coarsest level is reached, solve. Otherwise, keep smoothing
         if vLev == VDepth:
             #solve()
             smooth(preSm)
@@ -515,16 +513,6 @@ def smooth(sCount):
                                          hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
                                          hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
                                          hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
-        '''
-        # Gauss-Seidel smoothing
-        for i in range(1, n[0]+1):
-            for j in range(1, n[1]+1):
-                for k in range(1, n[2]+1):
-                    pData[vLev][i, j, k] = (hyhz[vLev]*(pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
-                                            hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
-                                            hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
-                                          hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
-        '''
 
     imposePpBCs(pData[vLev])
 
@@ -573,16 +561,6 @@ def solve():
                                          hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
                                          hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
                                          hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
-        '''
-        # Gauss-Seidel iterative solver
-        for i in range(1, n[0]+1):
-            for j in range(1, n[1]+1):
-                for k in range(1, n[2]+1):
-                    pData[vLev][i, j, k] = (hyhz[vLev]*(pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
-                                            hzhx[vLev]*(pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
-                                            hxhy[vLev]*(pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) -
-                                          hxhyhz[vLev]*rData[vLev][i, j, k]) * gsFactor[vLev]
-        '''
 
         locmaxErr = np.amax(np.abs(rData[vLev] - laplace(pData[vLev]))[1:-1, 1:-1, 1:-1])
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
@@ -666,35 +644,6 @@ def initMGArrays():
     rData = [np.zeros_like(x) for x in pData]
     sData = [np.zeros_like(x) for x in pData]
     iTemp = [np.zeros_like(x) for x in pData]
-
-
-def PoissonSolver(rho):
-    jCnt = 0
-    
-    while True:
-        Pp[x0, y0, z0] = (1.0/(-2.0*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] - 
-                                       idx2*(Pp[xm1, y0, z0] + Pp[xp1, y0, z0]) -
-                                       idy2*(Pp[x0, ym1, z0] + Pp[x0, yp1, z0]) -
-                                       idz2*(Pp[x0, y0, zm1] + Pp[x0, y0, zp1]))   
-
-        imposePpBCs(Pp)
-    
-        locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] -((
-                        (Pp[xm1, y0, z0] - 2.0*Pp[x0, y0, z0] + Pp[xp1, y0, z0])/hx2 +
-                        (Pp[x0, ym1, z0] - 2.0*Pp[x0, y0, z0] + Pp[x0, yp1, z0])/hy2 +
-                        (Pp[x0, y0, zm1] - 2.0*Pp[x0, y0, z0] + Pp[x0, y0, zp1])/hz2))))
-    
-        totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
-
-        if totmaxErr < PoissonTolerance:
-            break
-    
-        jCnt += 1
-        if jCnt > 50*maxCount:
-            print("ERROR: Poisson solver not converging. Aborting")
-            quit()
-    
-    return Pp[x0, y0, z0]     
 
 
 ############### Boundary Conditions ###############
@@ -821,7 +770,6 @@ def main():
                            (V[x0, yp1, z0] - V[x0, ym1, z0])/(2.0*hy) +
                            (W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))/dt
 
-        #Pp[x0, y0, z0] = PoissonSolver(rhs)
         Pp = multigrid(rhs)
 
         P[x0, y0, z0] = P[x0, y0, z0] + Pp[x0, y0, z0]
