@@ -15,10 +15,13 @@ Pr = 7
 # Taylor Number
 Ta = 1e5
 
+# Enable/Disable Parallel I/O
+mpiH5Py = False
+
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
 # Grid sizes: 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384
-sInd = np.array([7, 7, 7])
+sInd = np.array([6, 6, 6])
 
 # N should be of the form 2^n
 # Then there will be 2^n + 2 points in total, including 2 ghost points
@@ -28,7 +31,7 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 4
+VDepth = 3
 
 # Number of V-cycles to be computed
 vcCnt = 10
@@ -43,7 +46,7 @@ pstSm = 5
 tolerance = 1.0e-6
 
 # Time step
-dt = 0.001
+dt = 0.01
 
 # Final time
 tMax = 0.1
@@ -205,32 +208,57 @@ if rootRank:
 
 
 def writeSoln(U, V, W, P, T, time):
+    global mpiH5Py
     global gSt, gEn
     global rootRank
+    global Nx, Ny, Nz
 
     fName = "Soln_{0:09.5f}.h5".format(time)
     if rootRank:
         print("#Writing solution file: ", fName)        
 
-    f = hp.File(fName, "w", driver='mpio', comm=comm)
-
     dShape = Nx, Ny, Nz
 
-    uDset = f.create_dataset("U", dShape, dtype = 'f')
-    vDset = f.create_dataset("V", dShape, dtype = 'f')
-    wDset = f.create_dataset("W", dShape, dtype = 'f')
-    tDset = f.create_dataset("T", dShape, dtype = 'f')
-    pDset = f.create_dataset("P", dShape, dtype = 'f')
+    if mpiH5Py:
+        f = hp.File(fName, "w", driver='mpio', comm=comm)
 
-    for rCnt in range(nprocs):
-        if rCnt == rank:
-            uDset[gSt:gEn,:,:] = U[1:-1, 1:-1, 1:-1]
-            vDset[gSt:gEn,:,:] = V[1:-1, 1:-1, 1:-1]
-            wDset[gSt:gEn,:,:] = W[1:-1, 1:-1, 1:-1]
-            tDset[gSt:gEn,:,:] = T[1:-1, 1:-1, 1:-1]
-            pDset[gSt:gEn,:,:] = P[1:-1, 1:-1, 1:-1]
+        uDset = f.create_dataset("U", dShape, dtype = 'f')
+        vDset = f.create_dataset("V", dShape, dtype = 'f')
+        wDset = f.create_dataset("W", dShape, dtype = 'f')
+        tDset = f.create_dataset("T", dShape, dtype = 'f')
+        pDset = f.create_dataset("P", dShape, dtype = 'f')
 
-    f.close()
+        for rCnt in range(nprocs):
+            if rCnt == rank:
+                uDset[gSt:gEn,:,:] = U[1:-1, 1:-1, 1:-1]
+                vDset[gSt:gEn,:,:] = V[1:-1, 1:-1, 1:-1]
+                wDset[gSt:gEn,:,:] = W[1:-1, 1:-1, 1:-1]
+                tDset[gSt:gEn,:,:] = T[1:-1, 1:-1, 1:-1]
+                pDset[gSt:gEn,:,:] = P[1:-1, 1:-1, 1:-1]
+
+        f.close()
+
+        '''
+    else:
+        uFull = None
+        if rootRank:
+            uFull = np.zeros(dShape)
+
+        comm.Gather(U[1:-1, 1:-1, 1:-1], uFull[gSt:gEn,:,:], root=0)
+        if rootRank:
+            print(uFull.shape)
+        exit()
+
+        #sendbuf = np.zeros(100, dtype='i') + rank
+        #recvbuf = None
+        #if rank == 0:
+        #    recvbuf = np.empty([size, 100], dtype='i')
+        #comm.Gather(sendbuf, recvbuf, root=0)
+        #if rank == 0:
+        #    for i in range(size):
+        #        assert np.allclose(recvbuf[i,:], i)
+
+        '''
 
 
 def getDiv(U, V, W):
@@ -238,7 +266,7 @@ def getDiv(U, V, W):
               (V[x0, yp1, z0] - V[x0, ym1, z0])*0.5/hy +
               (W[x0, y0, zp1] - W[x0, y0, zm1])*0.5/hz)
     
-    locdivMax = np.max(abs(divMat))
+    locdivMax = np.max(abs(divMat[x0, y0, z0]))
 
     globdivMax = comm.reduce(locdivMax, op=MPI.MAX, root=0)
 
@@ -533,6 +561,8 @@ def smooth(sCount):
                                            hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
                                           hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
 
+        data_transfer(pData[vLev])
+
         # Update black cells
         # 1, 0, 0 configuration
         pData[vLev][2::2, 1:-1:2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][3::2, 1:-1:2, 1:-1:2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) +
@@ -626,6 +656,8 @@ def solve():
                                            hzhx[vLev]*(pData[vLev][1:-1:2, 3::2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, 2::2]) +
                                            hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
                                           hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
+
+        data_transfer(pData[vLev])
 
         # Update black cells
         # 1, 0, 0 configuration
@@ -871,13 +903,11 @@ def main():
 
         if iCnt % opInt == 0:
             uSqr = U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0
-            #locU = integrate.simps(integrate.simps(integrate.simps(uSqr, xCord[x0]), yCord[y0]), zCord[z0])
-            locU = np.sum(uSqr)/(locNx*Ny*Nz)
+            locU = integrate.simps(integrate.simps(integrate.simps(uSqr, zCord[z0]), yCord[y0]), xCord[x0])
             globU = comm.reduce(locU, op=MPI.SUM, root=0)
 
             wT = W[x0, y0, z0]*T[x0, y0, z0]
-            #locWT = integrate.simps(integrate.simps(integrate.simps(wT, xCord[x0]), yCord[y0]), zCord[z0])
-            locWT = np.sum(wT)/(locNx*Ny*Nz)
+            locWT = integrate.simps(integrate.simps(integrate.simps(wT, zCord[z0]), yCord[y0]), xCord[x0])
             totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
             maxDiv = getDiv(U, V, W)
