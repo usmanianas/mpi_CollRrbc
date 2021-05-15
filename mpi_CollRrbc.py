@@ -1,3 +1,4 @@
+import scipy.integrate as integrate
 from datetime import datetime
 from mpi4py import MPI
 import numpy as np
@@ -6,18 +7,18 @@ import h5py as hp
 ############### Simulation Parameters ###############
 
 # Rayleigh Number
-Ra = 1.0e4
+Ra = 5.0e4
 
 # Prandtl Number
-Pr = 0.7
+Pr = 7
 
 # Taylor Number
-Ta = 0.0
+Ta = 1e5
 
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
 # Grid sizes: 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384
-sInd = np.array([6, 6, 6])
+sInd = np.array([7, 7, 7])
 
 # N should be of the form 2^n
 # Then there will be 2^n + 2 points in total, including 2 ghost points
@@ -27,7 +28,7 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 3
+VDepth = 4
 
 # Number of V-cycles to be computed
 vcCnt = 10
@@ -42,22 +43,19 @@ pstSm = 5
 tolerance = 1.0e-6
 
 # Time step
-dt = 0.01
+dt = 0.001
 
 # Final time
-tMax = 10.0
+tMax = 0.1
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
 
 # File writing interval
-fwInt = 100
+fwInt = 200
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
-
-# Tolerance value in Poisson iterations
-PoissonTolerance = 1.0e-6
 
 # Omega for SOR
 gssor = 1.6
@@ -509,10 +507,56 @@ def smooth(sCount):
     for iCnt in range(sCount):
         imposePpBCs(pData[vLev])
 
-        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
-                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
-                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
-                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
+        # Vectorized Red-Black Gauss-Seidel
+        # Update red cells
+        # 0, 0, 0 configuration
+        pData[vLev][1:-1:2, 1:-1:2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][2::2, 1:-1:2, 1:-1:2] + pData[vLev][:-2:2, 1:-1:2, 1:-1:2]) +
+                                               hzhx[vLev]*(pData[vLev][1:-1:2, 2::2, 1:-1:2] + pData[vLev][1:-1:2, :-2:2, 1:-1:2]) +
+                                               hxhy[vLev]*(pData[vLev][1:-1:2, 1:-1:2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, :-2:2]) -
+                                              hxhyhz[vLev]*rData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) * gsFactor[vLev]
+
+        # 1, 1, 0 configuration
+        pData[vLev][2::2, 2::2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][3::2, 2::2, 1:-1:2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) +
+                                           hzhx[vLev]*(pData[vLev][2::2, 3::2, 1:-1:2] + pData[vLev][2::2, 1:-1:2, 1:-1:2]) +
+                                           hxhy[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][2::2, 2::2, :-2:2]) -
+                                          hxhyhz[vLev]*rData[vLev][2::2, 2::2, 1:-1:2]) * gsFactor[vLev]
+
+        # 1, 0, 1 configuration
+        pData[vLev][2::2, 1:-1:2, 2::2] = (hyhz[vLev]*(pData[vLev][3::2, 1:-1:2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, 2::2]) +
+                                           hzhx[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][2::2, :-2:2, 2::2]) +
+                                           hxhy[vLev]*(pData[vLev][2::2, 1:-1:2, 3::2] + pData[vLev][2::2, 1:-1:2, 1:-1:2]) -
+                                          hxhyhz[vLev]*rData[vLev][2::2, 1:-1:2, 2::2]) * gsFactor[vLev]
+
+        # 0, 1, 1 configuration
+        pData[vLev][1:-1:2, 2::2, 2::2] = (hyhz[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][:-2:2, 2::2, 2::2]) +
+                                           hzhx[vLev]*(pData[vLev][1:-1:2, 3::2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, 2::2]) +
+                                           hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
+                                          hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
+
+        # Update black cells
+        # 1, 0, 0 configuration
+        pData[vLev][2::2, 1:-1:2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][3::2, 1:-1:2, 1:-1:2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) +
+                                             hzhx[vLev]*(pData[vLev][2::2, 2::2, 1:-1:2] + pData[vLev][2::2, :-2:2, 1:-1:2]) +
+                                             hxhy[vLev]*(pData[vLev][2::2, 1:-1:2, 2::2] + pData[vLev][2::2, 1:-1:2, :-2:2]) -
+                                            hxhyhz[vLev]*rData[vLev][2::2, 1:-1:2, 1:-1:2]) * gsFactor[vLev]
+
+        # 0, 1, 0 configuration
+        pData[vLev][1:-1:2, 2::2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][2::2, 2::2, 1:-1:2] + pData[vLev][:-2:2, 2::2, 1:-1:2]) +
+                                             hzhx[vLev]*(pData[vLev][1:-1:2, 3::2, 1:-1:2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) +
+                                             hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 2::2] + pData[vLev][1:-1:2, 2::2, :-2:2]) -
+                                            hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 1:-1:2]) * gsFactor[vLev]
+
+        # 0, 0, 1 configuration
+        pData[vLev][1:-1:2, 1:-1:2, 2::2] = (hyhz[vLev]*(pData[vLev][2::2, 1:-1:2, 2::2] + pData[vLev][:-2:2, 1:-1:2, 2::2]) +
+                                             hzhx[vLev]*(pData[vLev][1:-1:2, 2::2, 2::2] + pData[vLev][1:-1:2, :-2:2, 2::2]) +
+                                             hxhy[vLev]*(pData[vLev][1:-1:2, 1:-1:2, 3::2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) -
+                                            hxhyhz[vLev]*rData[vLev][1:-1:2, 1:-1:2, 2::2]) * gsFactor[vLev]
+
+        # 1, 1, 1 configuration
+        pData[vLev][2::2, 2::2, 2::2] = (hyhz[vLev]*(pData[vLev][3::2, 2::2, 2::2] + pData[vLev][1:-1:2, 2::2, 2::2]) +
+                                         hzhx[vLev]*(pData[vLev][2::2, 3::2, 2::2] + pData[vLev][2::2, 1:-1:2, 2::2]) +
+                                         hxhy[vLev]*(pData[vLev][2::2, 2::2, 3::2] + pData[vLev][2::2, 2::2, 1:-1:2]) -
+                                        hxhyhz[vLev]*rData[vLev][2::2, 2::2, 2::2]) * gsFactor[vLev]
 
     imposePpBCs(pData[vLev])
 
@@ -557,10 +601,56 @@ def solve():
     while True:
         imposePpBCs(pData[vLev])
 
-        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
-                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
-                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
-                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]
+        # Vectorized Red-Black Gauss-Seidel
+        # Update red cells
+        # 0, 0, 0 configuration
+        pData[vLev][1:-1:2, 1:-1:2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][2::2, 1:-1:2, 1:-1:2] + pData[vLev][:-2:2, 1:-1:2, 1:-1:2]) +
+                                               hzhx[vLev]*(pData[vLev][1:-1:2, 2::2, 1:-1:2] + pData[vLev][1:-1:2, :-2:2, 1:-1:2]) +
+                                               hxhy[vLev]*(pData[vLev][1:-1:2, 1:-1:2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, :-2:2]) -
+                                              hxhyhz[vLev]*rData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) * gsFactor[vLev]
+
+        # 1, 1, 0 configuration
+        pData[vLev][2::2, 2::2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][3::2, 2::2, 1:-1:2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) +
+                                           hzhx[vLev]*(pData[vLev][2::2, 3::2, 1:-1:2] + pData[vLev][2::2, 1:-1:2, 1:-1:2]) +
+                                           hxhy[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][2::2, 2::2, :-2:2]) -
+                                          hxhyhz[vLev]*rData[vLev][2::2, 2::2, 1:-1:2]) * gsFactor[vLev]
+
+        # 1, 0, 1 configuration
+        pData[vLev][2::2, 1:-1:2, 2::2] = (hyhz[vLev]*(pData[vLev][3::2, 1:-1:2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, 2::2]) +
+                                           hzhx[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][2::2, :-2:2, 2::2]) +
+                                           hxhy[vLev]*(pData[vLev][2::2, 1:-1:2, 3::2] + pData[vLev][2::2, 1:-1:2, 1:-1:2]) -
+                                          hxhyhz[vLev]*rData[vLev][2::2, 1:-1:2, 2::2]) * gsFactor[vLev]
+
+        # 0, 1, 1 configuration
+        pData[vLev][1:-1:2, 2::2, 2::2] = (hyhz[vLev]*(pData[vLev][2::2, 2::2, 2::2] + pData[vLev][:-2:2, 2::2, 2::2]) +
+                                           hzhx[vLev]*(pData[vLev][1:-1:2, 3::2, 2::2] + pData[vLev][1:-1:2, 1:-1:2, 2::2]) +
+                                           hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
+                                          hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
+
+        # Update black cells
+        # 1, 0, 0 configuration
+        pData[vLev][2::2, 1:-1:2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][3::2, 1:-1:2, 1:-1:2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) +
+                                             hzhx[vLev]*(pData[vLev][2::2, 2::2, 1:-1:2] + pData[vLev][2::2, :-2:2, 1:-1:2]) +
+                                             hxhy[vLev]*(pData[vLev][2::2, 1:-1:2, 2::2] + pData[vLev][2::2, 1:-1:2, :-2:2]) -
+                                            hxhyhz[vLev]*rData[vLev][2::2, 1:-1:2, 1:-1:2]) * gsFactor[vLev]
+
+        # 0, 1, 0 configuration
+        pData[vLev][1:-1:2, 2::2, 1:-1:2] = (hyhz[vLev]*(pData[vLev][2::2, 2::2, 1:-1:2] + pData[vLev][:-2:2, 2::2, 1:-1:2]) +
+                                             hzhx[vLev]*(pData[vLev][1:-1:2, 3::2, 1:-1:2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) +
+                                             hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 2::2] + pData[vLev][1:-1:2, 2::2, :-2:2]) -
+                                            hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 1:-1:2]) * gsFactor[vLev]
+
+        # 0, 0, 1 configuration
+        pData[vLev][1:-1:2, 1:-1:2, 2::2] = (hyhz[vLev]*(pData[vLev][2::2, 1:-1:2, 2::2] + pData[vLev][:-2:2, 1:-1:2, 2::2]) +
+                                             hzhx[vLev]*(pData[vLev][1:-1:2, 2::2, 2::2] + pData[vLev][1:-1:2, :-2:2, 2::2]) +
+                                             hxhy[vLev]*(pData[vLev][1:-1:2, 1:-1:2, 3::2] + pData[vLev][1:-1:2, 1:-1:2, 1:-1:2]) -
+                                            hxhyhz[vLev]*rData[vLev][1:-1:2, 1:-1:2, 2::2]) * gsFactor[vLev]
+
+        # 1, 1, 1 configuration
+        pData[vLev][2::2, 2::2, 2::2] = (hyhz[vLev]*(pData[vLev][3::2, 2::2, 2::2] + pData[vLev][1:-1:2, 2::2, 2::2]) +
+                                         hzhx[vLev]*(pData[vLev][2::2, 3::2, 2::2] + pData[vLev][2::2, 1:-1:2, 2::2]) +
+                                         hxhy[vLev]*(pData[vLev][2::2, 2::2, 3::2] + pData[vLev][2::2, 2::2, 1:-1:2]) -
+                                        hxhyhz[vLev]*rData[vLev][2::2, 2::2, 2::2]) * gsFactor[vLev]
 
         locmaxErr = np.amax(np.abs(rData[vLev] - laplace(pData[vLev]))[1:-1, 1:-1, 1:-1])
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
@@ -570,7 +660,7 @@ def solve():
 
         jCnt += 1
         if jCnt > maxCountPp:
-            print("ERROR: Jacobi not converging. Aborting")
+            print("ERROR: Gauss-Seidel solver not converging. Aborting")
             quit()
 
     imposePpBCs(pData[vLev])
@@ -578,21 +668,14 @@ def solve():
 
 # Interpolates the data from an array of size 2^n to a larger array of size 2^(n + 1)
 def prolong():
-    global N
     global vLev
     global pData
 
     pLev = vLev
     vLev -= 1
 
-    n = N[vLev]
-    for i in range(1, n[0] + 1):
-        i2 = int((i-1)/2) + 1
-        for j in range(1, n[1] + 1):
-            j2 = int((j-1)/2) + 1
-            for k in range(1, n[2] + 1):
-                k2 = int((k-1)/2) + 1
-                pData[vLev][i, j, k] = pData[pLev][i2, j2, k2]
+    pData[vLev][1:-1:2, 1:-1:2, 1:-1:2] = pData[vLev][2::2, 1:-1:2, 1:-1:2] = pData[vLev][1:-1:2, 2::2, 1:-1:2] = pData[vLev][1:-1:2, 1:-1:2, 2::2] = \
+    pData[vLev][2::2, 2::2, 1:-1:2] = pData[vLev][1:-1:2, 2::2, 2::2] = pData[vLev][2::2, 1:-1:2, 2::2] = pData[vLev][2::2, 2::2, 2::2] = pData[pLev][1:-1, 1:-1, 1:-1]
 
 
 # Computes the 3D laplacian of function
@@ -787,17 +870,21 @@ def main():
         time = time + dt
 
         if iCnt % opInt == 0:
-            locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
-            locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
-
+            uSqr = U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0
+            #locU = integrate.simps(integrate.simps(integrate.simps(uSqr, xCord[x0]), yCord[y0]), zCord[z0])
+            locU = np.sum(uSqr)/(locNx*Ny*Nz)
             globU = comm.reduce(locU, op=MPI.SUM, root=0)
+
+            wT = W[x0, y0, z0]*T[x0, y0, z0]
+            #locWT = integrate.simps(integrate.simps(integrate.simps(wT, xCord[x0]), yCord[y0]), zCord[z0])
+            locWT = np.sum(wT)/(locNx*Ny*Nz)
             totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
             maxDiv = getDiv(U, V, W)
 
             if rootRank:
-                Re = globU/(nu*Nx*Ny*Nz)
-                Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
+                Re = np.sqrt(globU)/nu
+                Nu = 1.0 + totalWT/kappa
                 print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
         if iCnt % fwInt == 0:
