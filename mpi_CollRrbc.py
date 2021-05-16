@@ -15,9 +15,6 @@ Pr = 7
 # Taylor Number
 Ta = 1e5
 
-# Enable/Disable Parallel I/O
-mpiH5Py = False
-
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
 # Grid sizes: 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384
@@ -55,7 +52,11 @@ tMax = 0.1
 opInt = 1
 
 # File writing interval
-fwInt = 200
+fwInt = 10
+
+# Enable/Disable Parallel I/O
+# WARNING: Parallel h5py truncates floats to a lower precision
+mpiH5Py = False
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
@@ -217,6 +218,7 @@ def writeSoln(U, V, W, P, T, time):
     if rootRank:
         print("#Writing solution file: ", fName)        
 
+    f = None
     dShape = Nx, Ny, Nz
 
     if mpiH5Py:
@@ -238,27 +240,37 @@ def writeSoln(U, V, W, P, T, time):
 
         f.close()
 
-        '''
     else:
-        uFull = None
         if rootRank:
-            uFull = np.zeros(dShape)
+            f = hp.File(fName, "w")
 
-        comm.Gather(U[1:-1, 1:-1, 1:-1], uFull[gSt:gEn,:,:], root=0)
+        dFull = comm.gather(U[1:-1, 1:-1, 1:-1], root=0)
         if rootRank:
-            print(uFull.shape)
-        exit()
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("U", data = dFull)
 
-        #sendbuf = np.zeros(100, dtype='i') + rank
-        #recvbuf = None
-        #if rank == 0:
-        #    recvbuf = np.empty([size, 100], dtype='i')
-        #comm.Gather(sendbuf, recvbuf, root=0)
-        #if rank == 0:
-        #    for i in range(size):
-        #        assert np.allclose(recvbuf[i,:], i)
+        dFull = comm.gather(V[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("V", data = dFull)
 
-        '''
+        dFull = comm.gather(W[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("W", data = dFull)
+
+        dFull = comm.gather(T[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("T", data = dFull)
+
+        dFull = comm.gather(P[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("P", data = dFull)
+
+        if rootRank:
+            f.close()
 
 
 def getDiv(U, V, W):
