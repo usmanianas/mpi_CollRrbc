@@ -7,18 +7,18 @@ import h5py as hp
 ############### Simulation Parameters ###############
 
 # Rayleigh Number
-Ra = 5.0e4
+Ra = 1.0e4
 
 # Prandtl Number
-Pr = 7
+Pr = 0.71
 
 # Taylor Number
-Ta = 1e5
+Ta = 0e5
 
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
 # Grid sizes: 1 2 4 8 16 32 64 128 256 512 1024 2048 4096 8192 16384
-sInd = np.array([6, 6, 6])
+sInd = np.array([5, 5, 5])
 
 # N should be of the form 2^n
 # Then there will be 2^n + 2 points in total, including 2 ghost points
@@ -28,22 +28,27 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 3
+VDepth = 2#min(sInd) - 1
 
 # Number of V-cycles to be computed
 vcCnt = 10
 
 # Number of iterations during pre-smoothing
-preSm = 5
+preSm = 2
 
 # Number of iterations during post-smoothing
 pstSm = 5
 
 # Tolerance value for iterative solver
-tolerance = 1.0e-6
+tolerance = 1.0e-5
 
 # Time step
 dt = 0.01
+
+dtold = dt
+
+# CFL condition
+CFLn = 0.5
 
 # Final time
 tMax = 0.1
@@ -52,11 +57,11 @@ tMax = 0.1
 opInt = 1
 
 # File writing interval
-fwInt = 10
+fwInt = 0.05
 
 # Enable/Disable Parallel I/O
 # WARNING: Parallel h5py truncates floats to a lower precision
-mpiH5Py = False
+mpiH5Py = False #True, False
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
@@ -166,10 +171,11 @@ zm1 = slice(zSt-1, zEn-1)
 zp1 = slice(zSt+1, zEn+1)
 
 if rootRank:
+    print()
     print('# Grid', Nx, Ny, Nz)
     print('#No. of Processors =',nprocs)
 
-print('#', rank, xSt, xEn, xSize)
+#print('#', rank, xSt, xEn, xSize)
 
 ###############################################
 
@@ -194,7 +200,7 @@ Pp = np.zeros_like(P)
 
 # Initialize values
 P.fill(1.0)
-T[:, :, :] = 1 - zCord[:]
+#T[:, :, :] = 1 - zCord[:]
 
 ###############################################
 
@@ -203,7 +209,7 @@ T[:, :, :] = 1 - zCord[:]
 nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
 if rootRank:
-    print('#', 'Ra=', Ra, 'Pr=', Pr)
+    print('#', 'Ra=', Ra, 'Pr=', Pr, 'Ta=', Ta)
 
 ###############################################
 
@@ -487,6 +493,7 @@ def multigrid(H):
         locmaxRes = np.amax(np.abs(H[1:-1, 1:-1, 1:-1] - chMat[1:-1, 1:-1, 1:-1]))
         totmaxRes = comm.allreduce(locmaxRes, op=MPI.MAX)
         if totmaxRes < tolerance:
+            #print(i)
             break
 
     return pData[0]
@@ -546,7 +553,8 @@ def smooth(sCount):
     n = N[vLev]
     for iCnt in range(sCount):
         imposePpBCs(pData[vLev])
-
+        
+        
         # Vectorized Red-Black Gauss-Seidel
         # Update red cells
         # 0, 0, 0 configuration
@@ -573,7 +581,7 @@ def smooth(sCount):
                                            hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
                                           hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
 
-        data_transfer(pData[vLev])
+        #data_transfer(pData[vLev])
 
         # Update black cells
         # 1, 0, 0 configuration
@@ -600,6 +608,14 @@ def smooth(sCount):
                                          hxhy[vLev]*(pData[vLev][2::2, 2::2, 3::2] + pData[vLev][2::2, 2::2, 1:-1:2]) -
                                         hxhyhz[vLev]*rData[vLev][2::2, 2::2, 2::2]) * gsFactor[vLev]
 
+        '''
+
+        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
+                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
+                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
+                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]  
+        
+        '''
     imposePpBCs(pData[vLev])
 
 
@@ -755,7 +771,7 @@ def initMGArrays():
     N = [(int(x[0]/nprocs), x[1], x[2]) for x in N]
 
     # Finally update max iterations variable
-    maxSolCount = 100*N[-1][0]*N[-1][1]*N[-1][2]
+    maxSolCount = 2*N[-1][0]*N[-1][1]*N[-1][2]
 
     if maxSolCount > maxCountPp:
         if rootRank:
@@ -851,6 +867,8 @@ def imposePpBCs(Pp):
 def main():
     iCnt = 0
     time = 0
+    fwTime = 0.0
+    dtnew = 1.0e10
 
     initMGArrays()
 
@@ -870,11 +888,19 @@ def main():
     writeSoln(U, V, W, P, T, 0.0)
 
     if rootRank:
+        print()
+        print('# time \t\t Re \t\t Nu \t\t Divergence')
         Re = globU/(nu*Nx*Ny*Nz)
         Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
-        print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
+        print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))           
 
     while True:
+
+        if iCnt > 1:
+            dtnew = CFLn/comm.allreduce(np.amax((abs(U)/hx) + (abs(V)/hy) + (abs(W)/hz)), op=MPI.MAX)
+            
+        dt = min(dtnew, dtold)
+
         Hx[x0, y0, z0] = computeNLinDiff_X(U, V, W)
         Hy[x0, y0, z0] = computeNLinDiff_Y(U, V, W)
         Hz[x0, y0, z0] = computeNLinDiff_Z(U, V, W)
@@ -908,31 +934,43 @@ def main():
         imposeVBCs(V)
         imposeWBCs(W)
         imposePBCs(P)
-        imposeTBCs(T)
+        imposeTBCs(T)      
+
+        if abs(fwTime - time) < 0.5*dt:
+            fwTime = fwTime + fwInt
+            if iCnt > 1:
+                writeSoln(U, V, W, P, T, time)
+            
 
         iCnt = iCnt + 1
         time = time + dt
 
         if iCnt % opInt == 0:
             uSqr = U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0
-            locU = integrate.simps(integrate.simps(integrate.simps(uSqr, zCord[z0]), yCord[y0]), xCord[x0])
-            globU = comm.reduce(locU, op=MPI.SUM, root=0)
+            uSqr = comm.gather(uSqr, root=0)
+            #locU = (integrate.simps(integrate.simps(integrate.simps(uSqr, zCord[z0]), yCord[y0]), xCord[x0]))/(Lx*Ly*Lz)
+            #globU = comm.reduce(locU, op=MPI.SUM, root=0)
 
             wT = W[x0, y0, z0]*T[x0, y0, z0]
-            locWT = integrate.simps(integrate.simps(integrate.simps(wT, zCord[z0]), yCord[y0]), xCord[x0])
-            totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
+            wT = comm.gather(wT, root=0)
+            #locWT = (integrate.simps(integrate.simps(integrate.simps(wT, zCord[z0]), yCord[y0]), xCord[x0]))/(Lx*Ly*Lz)
+            #totalWT = comm.reduce(locWT, op=MPI.SUM, root=0)
 
             maxDiv = getDiv(U, V, W)
 
             if rootRank:
+                uSqr = np.concatenate(uSqr)
+                globU = (integrate.simps(integrate.simps(integrate.simps(uSqr, zCord[1:-1]), yCord[1:-1]), xCord[1:-1]))/(Lx*Ly*Lz)
                 Re = np.sqrt(globU)/nu
-                Nu = 1.0 + totalWT/kappa
-                print("%f    %f    %f    %f" %(time, Re, Nu, maxDiv))           
 
-        if iCnt % fwInt == 0:
-            writeSoln(U, V, W, P, T, time)
+                wT = np.concatenate(wT)
+                totalWT = (integrate.simps(integrate.simps(integrate.simps(wT, zCord[1:-1]), yCord[1:-1]), xCord[1:-1]))/(Lx*Ly*Lz)
+                Nu = 1.0 + totalWT/kappa
+                print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))     
+
 
         if time + dt/2.0 > tMax:
+            writeSoln(U, V, W, P, T, time)
             break   
 
     t2 = datetime.now()
