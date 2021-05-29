@@ -13,7 +13,7 @@ Ra = 1.0e4
 Pr = 0.71
 
 # Taylor Number
-Ta = 0e5
+Ta = 0.0
 
 # Choose the grid sizes as indices from below list so that there are 2^n + 2 grid points
 # Size index: 0 1 2 3  4  5  6  7   8   9   10   11   12   13    14
@@ -28,16 +28,16 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 2#min(sInd) - 1
+VDepth = 3
 
 # Number of V-cycles to be computed
 vcCnt = 10
 
 # Number of iterations during pre-smoothing
-preSm = 2
+preSm = 4
 
 # Number of iterations during post-smoothing
-pstSm = 5
+pstSm = 4
 
 # Tolerance value for iterative solver
 tolerance = 1.0e-5
@@ -45,10 +45,8 @@ tolerance = 1.0e-5
 # Time step
 dt = 0.01
 
-dtold = dt
-
 # CFL condition
-CFLn = 0.5
+cflNo = 0.5
 
 # Final time
 tMax = 0.1
@@ -57,11 +55,11 @@ tMax = 0.1
 opInt = 1
 
 # File writing interval
-fwInt = 0.05
+fwInt = 100.0
 
 # Enable/Disable Parallel I/O
 # WARNING: Parallel h5py truncates floats to a lower precision
-mpiH5Py = False #True, False
+mpiH5Py = False
 
 # Tolerance value in Jacobi iterations
 VpTolerance = 1.0e-5
@@ -171,38 +169,8 @@ zm1 = slice(zSt-1, zEn-1)
 zp1 = slice(zSt+1, zEn+1)
 
 if rootRank:
-    print()
-    print('# Grid', Nx, Ny, Nz)
-    print('#No. of Processors =',nprocs)
-
-#print('#', rank, xSt, xEn, xSize)
-
-###############################################
-
-############# Fields Initialization ###########
-
-# Field variables
-U = np.zeros([xSize, Ny+2, Nz+2])
-V = np.zeros([xSize, Ny+2, Nz+2])
-W = np.zeros([xSize, Ny+2, Nz+2])
-T = np.zeros([xSize, Ny+2, Nz+2])
-P = np.zeros([xSize, Ny+2, Nz+2])
-
-# Auxilliary variables
-Pp = np.zeros([xSize, Ny+2, Nz+2])
-
-# RHS Terms
-Hx = np.zeros_like(U)
-Hy = np.zeros_like(V)
-Hz = np.zeros_like(W)
-Ht = np.zeros_like(T)   
-Pp = np.zeros_like(P)
-
-# Initialize values
-P.fill(1.0)
-#T[:, :, :] = 1 - zCord[:]
-
-###############################################
+    print('\n# Grid', Nx, Ny, Nz)
+    print('# No. of Processors =', nprocs)
 
 ############### Flow Parameters ###############
 
@@ -210,6 +178,42 @@ nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
 if rootRank:
     print('#', 'Ra=', Ra, 'Pr=', Pr, 'Ta=', Ta)
+
+
+############# Fields Initialization ###########
+
+def initFields():
+    global Hx, Hy, Hz, Ht, Pp
+    global U, V, W, P, T
+
+    # Field variables
+    U = np.zeros([xSize, Ny+2, Nz+2])
+    V = np.zeros([xSize, Ny+2, Nz+2])
+    W = np.zeros([xSize, Ny+2, Nz+2])
+    T = np.zeros([xSize, Ny+2, Nz+2])
+    P = np.zeros([xSize, Ny+2, Nz+2])
+
+    # Auxilliary variables
+    Pp = np.zeros([xSize, Ny+2, Nz+2])
+
+    # RHS Terms
+    Hx = np.zeros_like(U)
+    Hy = np.zeros_like(V)
+    Hz = np.zeros_like(W)
+    Ht = np.zeros_like(T)   
+    Pp = np.zeros_like(P)
+
+    # Initialize values
+    P.fill(1.0)
+    #T[:, :, :] = 1 - zCord[:]
+
+    # Impose BCs
+    imposeUBCs(U)
+    imposeVBCs(V)
+    imposeWBCs(W)
+    imposePBCs(P)
+    imposeTBCs(T)
+
 
 ###############################################
 
@@ -302,6 +306,9 @@ def data_transfer(F):
     reqLft.wait()
 
 
+############### Nonlinear and Diffusion Calculations ###############
+
+
 def computeNLinDiff_X(U, V, W):
     global Hx
     global hx2, hy2, hz2
@@ -362,7 +369,12 @@ def computeNLinDiff_T(U, V, W, T):
     return Ht[x0, y0, z0]
 
 
+############### Iterative Solvers ###############
+
+
 def uJacobi(rho):
+    global dt
+
     jCnt = 0
     while True:
         U[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
@@ -391,6 +403,8 @@ def uJacobi(rho):
 
 
 def vJacobi(rho):
+    global dt
+
     jCnt = 0
     while True:
         V[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
@@ -419,6 +433,8 @@ def vJacobi(rho):
 
 
 def wJacobi(rho):
+    global dt
+
     jCnt = 0
     while True:
         W[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
@@ -447,6 +463,8 @@ def wJacobi(rho):
 
 
 def TJacobi(rho):
+    global dt
+
     jCnt = 0
     while True:
         T[x0, y0, z0] = (1.0/(1 + kappa*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
@@ -493,7 +511,6 @@ def multigrid(H):
         locmaxRes = np.amax(np.abs(H[1:-1, 1:-1, 1:-1] - chMat[1:-1, 1:-1, 1:-1]))
         totmaxRes = comm.allreduce(locmaxRes, op=MPI.MAX)
         if totmaxRes < tolerance:
-            #print(i)
             break
 
     return pData[0]
@@ -553,8 +570,7 @@ def smooth(sCount):
     n = N[vLev]
     for iCnt in range(sCount):
         imposePpBCs(pData[vLev])
-        
-        
+
         # Vectorized Red-Black Gauss-Seidel
         # Update red cells
         # 0, 0, 0 configuration
@@ -581,7 +597,7 @@ def smooth(sCount):
                                            hxhy[vLev]*(pData[vLev][1:-1:2, 2::2, 3::2] + pData[vLev][1:-1:2, 2::2, 1:-1:2]) -
                                           hxhyhz[vLev]*rData[vLev][1:-1:2, 2::2, 2::2]) * gsFactor[vLev]
 
-        #data_transfer(pData[vLev])
+        data_transfer(pData[vLev])
 
         # Update black cells
         # 1, 0, 0 configuration
@@ -608,14 +624,6 @@ def smooth(sCount):
                                          hxhy[vLev]*(pData[vLev][2::2, 2::2, 3::2] + pData[vLev][2::2, 2::2, 1:-1:2]) -
                                         hxhyhz[vLev]*rData[vLev][2::2, 2::2, 2::2]) * gsFactor[vLev]
 
-        '''
-
-        pData[vLev][1:-1, 1:-1, 1:-1] = (hyhz[vLev]*(pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
-                                         hzhx[vLev]*(pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
-                                         hxhy[vLev]*(pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) -
-                                         hxhyhz[vLev]*rData[vLev][1:-1, 1:-1, 1:-1]) * gsFactor[vLev]  
-        
-        '''
     imposePpBCs(pData[vLev])
 
 
@@ -771,7 +779,7 @@ def initMGArrays():
     N = [(int(x[0]/nprocs), x[1], x[2]) for x in N]
 
     # Finally update max iterations variable
-    maxSolCount = 2*N[-1][0]*N[-1][1]*N[-1][2]
+    maxSolCount = 10*N[-1][0]*N[-1][1]*N[-1][2]
 
     if maxSolCount > maxCountPp:
         if rootRank:
@@ -864,12 +872,18 @@ def imposePpBCs(Pp):
     Pp[:, :, 0], Pp[:, :, -1] = Pp[:, :, 1], Pp[:, :, -2]
 
 
+############### Main Solver ###############
+
+
 def main():
+    global dt, cflNo
+
     iCnt = 0
     time = 0
     fwTime = 0.0
     dtnew = 1.0e10
 
+    initFields()
     initMGArrays()
 
     rhs = np.zeros([xSize, Ny+2, Nz+2])
@@ -877,6 +891,9 @@ def main():
     t1 = datetime.now()
 
     # Write output at t = 0
+    writeSoln(U, V, W, P, T, 0.0)
+    fwTime = fwTime + fwInt
+
     locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
     locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
 
@@ -885,21 +902,17 @@ def main():
 
     maxDiv = getDiv(U, V, W)
 
-    writeSoln(U, V, W, P, T, 0.0)
-
     if rootRank:
-        print()
-        print('# time \t\t Re \t\t Nu \t\t Divergence')
+        print('\n# time \t\t Re \t\t Nu \t\t Divergence')
         Re = globU/(nu*Nx*Ny*Nz)
         Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
         print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))           
 
     while True:
-
         if iCnt > 1:
-            dtnew = CFLn/comm.allreduce(np.amax((abs(U)/hx) + (abs(V)/hy) + (abs(W)/hz)), op=MPI.MAX)
+            dtnew = cflNo/comm.allreduce(np.amax((abs(U)/hx) + (abs(V)/hy) + (abs(W)/hz)), op=MPI.MAX)
             
-        dt = min(dtnew, dtold)
+        dt = min(dtnew, dt)
 
         Hx[x0, y0, z0] = computeNLinDiff_X(U, V, W)
         Hy[x0, y0, z0] = computeNLinDiff_Y(U, V, W)
@@ -934,13 +947,7 @@ def main():
         imposeVBCs(V)
         imposeWBCs(W)
         imposePBCs(P)
-        imposeTBCs(T)      
-
-        if abs(fwTime - time) < 0.5*dt:
-            fwTime = fwTime + fwInt
-            if iCnt > 1:
-                writeSoln(U, V, W, P, T, time)
-            
+        imposeTBCs(T)
 
         iCnt = iCnt + 1
         time = time + dt
@@ -968,9 +975,11 @@ def main():
                 Nu = 1.0 + totalWT/kappa
                 print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))     
 
+        if abs(fwTime - time) < 0.5*dt:
+            writeSoln(U, V, W, P, T, time)
+            fwTime = fwTime + fwInt
 
         if time + dt/2.0 > tMax:
-            writeSoln(U, V, W, P, T, time)
             break   
 
     t2 = datetime.now()
