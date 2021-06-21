@@ -257,9 +257,18 @@ def writeSoln(U, V, W, P, T, time):
 
 
 def getDiv(U, V, W):
-    divMat = ((U[xp1, y0, z0] - U[xm1, y0, z0])*0.5/hx +
-              (V[x0, yp1, z0] - V[x0, ym1, z0])*0.5/hy +
-              (W[x0, y0, zp1] - W[x0, y0, zm1])*0.5/hz)
+    global nuFlag
+    global i2hx, i2hy, i2hz
+    global xi_x, et_y, zt_z
+
+    if nuFlag:
+        divMat = ((U[xp1, y0, z0] - U[xm1, y0, z0]) * xi_x[0] * i2hx[0] +
+                  (V[x0, yp1, z0] - V[x0, ym1, z0]) * et_y[0] * i2hy[0] +
+                  (W[x0, y0, zp1] - W[x0, y0, zm1]) * zt_z[0] * i2hz[0])
+    else:
+        divMat = ((U[xp1, y0, z0] - U[xm1, y0, z0]) * i2hx[0] +
+                  (V[x0, yp1, z0] - V[x0, ym1, z0]) * i2hy[0] +
+                  (W[x0, y0, zp1] - W[x0, y0, zm1]) * i2hz[0])
     
     locdivMax = np.max(abs(divMat[x0, y0, z0]))
 
@@ -283,61 +292,110 @@ def data_transfer(F):
 
 
 def computeNLinDiff_X(U, V, W):
-    global Hx
-    global hx2, hy2, hz2
-    global nu, hx, hy, hz
+    global Hx, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
-    Hx[x0, y0, z0] = (((U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0])/hx2 + 
-                       (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0])/hy2 + 
-                       (U[x0, y0, zp1] - 2.0*U[x0, y0, z0] + U[x0, y0, zm1])/hz2)*0.5*nu -
-                        U[x0, y0, z0]*(U[xp1, y0, z0] - U[xm1, y0, z0])/(2.0*hx) -
-                        V[x0, y0, z0]*(U[x0, yp1, z0] - U[x0, ym1, z0])/(2.0*hy) - 
-                        W[x0, y0, z0]*(U[x0, y0, zp1] - U[x0, y0, zm1])/(2.0*hz))
+    if nuFlag:
+        Hx[x0, y0, z0] = ((xix2[0] * ihx2[0] * (U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0]) + 
+                           xixx[0] * i2hx[0] * (U[xp1, y0, z0] - U[xm1, y0, z0]) + 
+                           ety2[0] * ihy2[0] * (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0]) + 
+                           etyy[0] * i2hy[0] * (U[x0, yp1, z0] - U[x0, ym1, z0]) + 
+                           ztz2[0] * ihz2[0] * (U[x0, y0, zp1] - 2.0*U[x0, y0, z0] + U[x0, y0, zm1]) +
+                           ztzz[0] * i2hz[0] * (U[x0, y0, zp1] - U[x0, y0, zm1]))*0.5*nu -
+                            U[x0, y0, z0] * i2hx[0] * xi_x[0] * (U[xp1, y0, z0] - U[xm1, y0, z0]) -
+                            V[x0, y0, z0] * i2hy[0] * et_y[0] * (U[x0, yp1, z0] - U[x0, ym1, z0]) - 
+                            W[x0, y0, z0] * i2hz[0] * zt_z[0] * (U[x0, y0, zp1] - U[x0, y0, zm1]))
+    else:
+        Hx[x0, y0, z0] = (((U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0])*ihx2[0] + 
+                           (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0])*ihy2[0] + 
+                           (U[x0, y0, zp1] - 2.0*U[x0, y0, z0] + U[x0, y0, zm1])*ihz2[0])*0.5*nu -
+                            U[x0, y0, z0]*(U[xp1, y0, z0] - U[xm1, y0, z0])*i2hx[0] -
+                            V[x0, y0, z0]*(U[x0, yp1, z0] - U[x0, ym1, z0])*i2hy[0] - 
+                            W[x0, y0, z0]*(U[x0, y0, zp1] - U[x0, y0, zm1])*i2hz[0])
 
     return Hx[x0, y0, z0]
 
 
 def computeNLinDiff_Y(U, V, W):
-    global Hy
-    global hx2, hy2, hz2
-    global nu, hx, hy, hz
+    global Hy, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
-    Hy[x0, y0, z0] = (((V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0])/hx2 + 
-                       (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0])/hy2 + 
-                       (V[x0, y0, zp1] - 2.0*V[x0, y0, z0] + V[x0, y0, zm1])/hz2)*0.5*nu -
-                        U[x0, y0, z0]*(V[xp1, y0, z0] - V[xm1, y0, z0])/(2.0*hx) -
-                        V[x0, y0, z0]*(V[x0, yp1, z0] - V[x0, ym1, z0])/(2.0*hy) - 
-                        W[x0, y0, z0]*(V[x0, y0, zp1] - V[x0, y0, zm1])/(2.0*hz))
+    if nuFlag:
+        Hy[x0, y0, z0] = ((xix2[0] * ihx2[0] * (V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0]) + 
+                           xixx[0] * i2hx[0] * (V[xp1, y0, z0] - V[xm1, y0, z0]) + 
+                           ety2[0] * ihy2[0] * (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0]) + 
+                           etyy[0] * i2hy[0] * (V[x0, yp1, z0] - V[x0, ym1, z0]) + 
+                           ztz2[0] * ihz2[0] * (V[x0, y0, zp1] - 2.0*V[x0, y0, z0] + V[x0, y0, zm1]) +
+                           ztzz[0] * i2hz[0] * (V[x0, y0, zp1] - V[x0, y0, zm1]))*0.5*nu -
+                            U[x0, y0, z0] * i2hx[0] * xi_x[0] * (V[xp1, y0, z0] - V[xm1, y0, z0]) -
+                            V[x0, y0, z0] * i2hy[0] * et_y[0] * (V[x0, yp1, z0] - V[x0, ym1, z0]) - 
+                            W[x0, y0, z0] * i2hz[0] * zt_z[0] * (V[x0, y0, zp1] - V[x0, y0, zm1]))
+    else:
+        Hy[x0, y0, z0] = (((V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0])*ihx2[0] + 
+                           (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0])*ihy2[0] + 
+                           (V[x0, y0, zp1] - 2.0*V[x0, y0, z0] + V[x0, y0, zm1])*ihz2[0])*0.5*nu -
+                            U[x0, y0, z0]*(V[xp1, y0, z0] - V[xm1, y0, z0])*i2hx[0] -
+                            V[x0, y0, z0]*(V[x0, yp1, z0] - V[x0, ym1, z0])*i2hy[0] - 
+                            W[x0, y0, z0]*(V[x0, y0, zp1] - V[x0, y0, zm1])*i2hz[0])
 
     return Hy[x0, y0, z0]
 
 
 def computeNLinDiff_Z(U, V, W):
-    global Hz
-    global hx2, hy2, hz2
-    global nu, hx, hy, hz
+    global Hz, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
-    Hz[x0, y0, z0] = (((W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0])/hx2 + 
-                       (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0])/hy2 + 
-                       (W[x0, y0, zp1] - 2.0*W[x0, y0, z0] + W[x0, y0, zm1])/hz2)*0.5*nu -
-                        U[x0, y0, z0]*(W[xp1, y0, z0] - W[xm1, y0, z0])/(2.0*hx) -
-                        V[x0, y0, z0]*(W[x0, yp1, z0] - W[x0, ym1, z0])/(2.0*hy) - 
-                        W[x0, y0, z0]*(W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))
+    if nuFlag:
+        Hz[x0, y0, z0] = ((xix2[0] * ihx2[0] * (W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0]) + 
+                           xixx[0] * i2hx[0] * (W[xp1, y0, z0] - W[xm1, y0, z0]) + 
+                           ety2[0] * ihy2[0] * (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0]) + 
+                           etyy[0] * i2hy[0] * (W[x0, yp1, z0] - W[x0, ym1, z0]) + 
+                           ztz2[0] * ihz2[0] * (W[x0, y0, zp1] - 2.0*W[x0, y0, z0] + W[x0, y0, zm1]) +
+                           ztzz[0] * i2hz[0] * (W[x0, y0, zp1] - W[x0, y0, zm1]))*0.5*nu -
+                            U[x0, y0, z0] * i2hx[0] * xi_x[0] * (W[xp1, y0, z0] - W[xm1, y0, z0]) -
+                            V[x0, y0, z0] * i2hy[0] * et_y[0] * (W[x0, yp1, z0] - W[x0, ym1, z0]) - 
+                            W[x0, y0, z0] * i2hz[0] * zt_z[0] * (W[x0, y0, zp1] - W[x0, y0, zm1]))
+    else:
+        Hz[x0, y0, z0] = (((W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0])*ihx2[0] + 
+                           (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0])*ihy2[0] + 
+                           (W[x0, y0, zp1] - 2.0*W[x0, y0, z0] + W[x0, y0, zm1])*ihz2[0])*0.5*nu -
+                            U[x0, y0, z0]*(W[xp1, y0, z0] - W[xm1, y0, z0])*i2hx[0] -
+                            V[x0, y0, z0]*(W[x0, yp1, z0] - W[x0, ym1, z0])*i2hy[0] - 
+                            W[x0, y0, z0]*(W[x0, y0, zp1] - W[x0, y0, zm1])*i2hz[0])
 
     return Hz[x0, y0, z0]
 
 
 def computeNLinDiff_T(U, V, W, T):
     global Ht
-    global hx2, hy2, hz2
-    global kappa, hx, hy, hz
+    global kappa
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
-    Ht[x0, y0, z0] = (((T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0])/hx2 + 
-                       (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0])/hy2 + 
-                       (T[x0, y0, zp1] - 2.0*T[x0, y0, z0] + T[x0, y0, zm1])/hz2)*0.5*kappa -
-                        U[x0, y0, z0]*(T[xp1, y0, z0] - T[xm1, y0, z0])/(2.0*hx)-
-                        V[x0, y0, z0]*(T[x0, yp1, z0] - T[x0, ym1, z0])/(2.0*hy) - 
-                        W[x0, y0, z0]*(T[x0, y0, zp1] - T[x0, y0, zm1])/(2.0*hz))
+    if nuFlag:
+        Ht[x0, y0, z0] = ((xix2[0] * ihx2[0] * (T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0]) + 
+                           xixx[0] * i2hx[0] * (T[xp1, y0, z0] - T[xm1, y0, z0]) + 
+                           ety2[0] * ihy2[0] * (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0]) + 
+                           etyy[0] * i2hy[0] * (T[x0, yp1, z0] - T[x0, ym1, z0]) + 
+                           ztz2[0] * ihz2[0] * (T[x0, y0, zp1] - 2.0*T[x0, y0, z0] + T[x0, y0, zm1]) +
+                           ztzz[0] * i2hz[0] * (T[x0, y0, zp1] - T[x0, y0, zm1]))*0.5*kappa -
+                            U[x0, y0, z0] * i2hx[0] * xi_x[0] * (T[xp1, y0, z0] - T[xm1, y0, z0]) -
+                            V[x0, y0, z0] * i2hy[0] * et_y[0] * (T[x0, yp1, z0] - T[x0, ym1, z0]) - 
+                            W[x0, y0, z0] * i2hz[0] * zt_z[0] * (T[x0, y0, zp1] - T[x0, y0, zm1]))
+    else:
+        Ht[x0, y0, z0] = (((T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0])*ihx2[0] + 
+                           (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0])*ihy2[0] + 
+                           (T[x0, y0, zp1] - 2.0*T[x0, y0, z0] + T[x0, y0, zm1])*ihz2[0])*0.5*kappa -
+                            U[x0, y0, z0]*(T[xp1, y0, z0] - T[xm1, y0, z0])*i2hx[0]-
+                            V[x0, y0, z0]*(T[x0, yp1, z0] - T[x0, ym1, z0])*i2hy[0] - 
+                            W[x0, y0, z0]*(T[x0, y0, zp1] - T[x0, y0, zm1])*i2hz[0])
 
     return Ht[x0, y0, z0]
 
@@ -346,21 +404,43 @@ def computeNLinDiff_T(U, V, W, T):
 
 
 def uJacobi(rho):
-    global dt
+    global dt, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xixx, xix2, etyy, ety2, ztzz, ztz2
 
     jCnt = 0
     while True:
-        U[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
-                                       0.5*nu*dt*idx2*(U[xm1, y0, z0] + U[xp1, y0, z0]) +
-                                       0.5*nu*dt*idy2*(U[x0, ym1, z0] + U[x0, yp1, z0]) +
-                                       0.5*nu*dt*idz2*(U[x0, y0, zm1] + U[x0, y0, zp1]))          
+        if nuFlag:
+            U[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                xix2[0] * ihx2[0] * (U[xp1, y0, z0] + U[xm1, y0, z0]) +
+                                xixx[0] * i2hx[0] * (U[xp1, y0, z0] - U[xm1, y0, z0]) +
+                                ety2[0] * ihy2[0] * (U[x0, yp1, z0] + U[x0, ym1, z0]) +
+                                etyy[0] * i2hy[0] * (U[x0, yp1, z0] - U[x0, ym1, z0]) +
+                                ztz2[0] * ihz2[0] * (U[x0, y0, zp1] + U[x0, y0, zm1]) +
+                                ztzz[0] * i2hz[0] * (U[x0, y0, zp1] - U[x0, y0, zm1]))
+                            ) / (1 + nu*dt*(ihx2[0]*xix2[0] + ihy2[0]*ety2[0] + ihz2[0]*ztz2[0]))
+        else:
+            U[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                ihx2[0] * (U[xp1, y0, z0] + U[xm1, y0, z0]) +
+                                ihy2[0] * (U[x0, yp1, z0] + U[x0, ym1, z0]) +
+                                ihz2[0] * (U[x0, y0, zp1] + U[x0, y0, zm1]))) / (1 + nu*dt*(ihx2[0] + ihy2[0] + ihz2[0]))
 
         imposeUBCs(U)
         
-        locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (U[x0, y0, z0] - 0.5*nu*dt*(
-                            (U[xm1, y0, z0] - 2.0*U[x0, y0, z0] + U[xp1, y0, z0])/hx2 +
-                            (U[x0, ym1, z0] - 2.0*U[x0, y0, z0] + U[x0, yp1, z0])/hy2 +
-                            (U[x0, y0, zm1] - 2.0*U[x0, y0, z0] + U[x0, y0, zp1])/hz2))))
+        if nuFlag:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (U[x0, y0, z0] - 0.5*nu*dt*(
+                               xix2[0] * ihx2[0] * (U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0]) + 
+                               xixx[0] * i2hx[0] * (U[xp1, y0, z0] - U[xm1, y0, z0]) + 
+                               ety2[0] * ihy2[0] * (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0]) + 
+                               etyy[0] * i2hy[0] * (U[x0, yp1, z0] - U[x0, ym1, z0]) + 
+                               ztz2[0] * ihz2[0] * (U[x0, y0, zp1] - 2.0*U[x0, y0, z0] + U[x0, y0, zm1]) +
+                               ztzz[0] * i2hz[0] * (U[x0, y0, zp1] - U[x0, y0, zm1])))))
+        else:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (U[x0, y0, z0] - 0.5*nu*dt*(
+                                (U[xp1, y0, z0] - 2.0*U[x0, y0, z0] + U[xm1, y0, z0])*ihx2[0] +
+                                (U[x0, yp1, z0] - 2.0*U[x0, y0, z0] + U[x0, ym1, z0])*ihy2[0] +
+                                (U[x0, y0, zp1] - 2.0*U[x0, y0, z0] + U[x0, y0, zm1])*ihz2[0]))))
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -376,22 +456,44 @@ def uJacobi(rho):
 
 
 def vJacobi(rho):
-    global dt
+    global dt, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xixx, xix2, etyy, ety2, ztzz, ztz2
 
     jCnt = 0
     while True:
-        V[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
-                                       0.5*nu*dt*idx2*(V[xm1, y0, z0] + V[xp1, y0, z0]) +
-                                       0.5*nu*dt*idy2*(V[x0, ym1, z0] + V[x0, yp1, z0]) +
-                                       0.5*nu*dt*idz2*(V[x0, y0, zm1] + V[x0, y0, zp1]))  
+        if nuFlag:
+            V[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                xix2[0] * ihx2[0] * (V[xp1, y0, z0] + V[xm1, y0, z0]) +
+                                xixx[0] * i2hx[0] * (V[xp1, y0, z0] - V[xm1, y0, z0]) +
+                                ety2[0] * ihy2[0] * (V[x0, yp1, z0] + V[x0, ym1, z0]) +
+                                etyy[0] * i2hy[0] * (V[x0, yp1, z0] - V[x0, ym1, z0]) +
+                                ztz2[0] * ihz2[0] * (V[x0, y0, zp1] + V[x0, y0, zm1]) +
+                                ztzz[0] * i2hz[0] * (V[x0, y0, zp1] - V[x0, y0, zm1]))
+                            ) / (1 + nu*dt*(ihx2[0]*xix2[0] + ihy2[0]*ety2[0] + ihz2[0]*ztz2[0]))
+        else:
+            V[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                ihx2[0] * (V[xp1, y0, z0] + V[xm1, y0, z0]) +
+                                ihy2[0] * (V[x0, yp1, z0] + V[x0, ym1, z0]) +
+                                ihz2[0] * (V[x0, y0, zp1] + V[x0, y0, zm1]))) / (1 + nu*dt*(ihx2[0] + ihy2[0] + ihz2[0]))
 
         imposeVBCs(V)
 
-        locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (V[x0, y0, z0] - 0.5*nu*dt*(
-                        (V[xm1, y0, z0] - 2.0*V[x0, y0, z0] + V[xp1, y0, z0])/hx2 +
-                        (V[x0, ym1, z0] - 2.0*V[x0, y0, z0] + V[x0, yp1, z0])/hy2 +
-                        (V[x0, y0, zm1] - 2.0*V[x0, y0, z0] + V[x0, y0, zp1])/hz2))))
-    
+        if nuFlag:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (V[x0, y0, z0] - 0.5*nu*dt*(
+                               xix2[0] * ihx2[0] * (V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0]) + 
+                               xixx[0] * i2hx[0] * (V[xp1, y0, z0] - V[xm1, y0, z0]) + 
+                               ety2[0] * ihy2[0] * (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0]) + 
+                               etyy[0] * i2hy[0] * (V[x0, yp1, z0] - V[x0, ym1, z0]) + 
+                               ztz2[0] * ihz2[0] * (V[x0, y0, zp1] - 2.0*V[x0, y0, z0] + V[x0, y0, zm1]) +
+                               ztzz[0] * i2hz[0] * (V[x0, y0, zp1] - V[x0, y0, zm1])))))
+        else:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (V[x0, y0, z0] - 0.5*nu*dt*(
+                                (V[xp1, y0, z0] - 2.0*V[x0, y0, z0] + V[xm1, y0, z0])*ihx2[0] +
+                                (V[x0, yp1, z0] - 2.0*V[x0, y0, z0] + V[x0, ym1, z0])*ihy2[0] +
+                                (V[x0, y0, zp1] - 2.0*V[x0, y0, z0] + V[x0, y0, zm1])*ihz2[0]))))
+
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
         if totmaxErr < VpTolerance:
@@ -406,21 +508,43 @@ def vJacobi(rho):
 
 
 def wJacobi(rho):
-    global dt
+    global dt, nu
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xixx, xix2, etyy, ety2, ztzz, ztz2
 
     jCnt = 0
     while True:
-        W[x0, y0, z0] = (1.0/(1 + nu*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
-                                       0.5*nu*dt*idx2*(W[xm1, y0, z0] + W[xp1, y0, z0]) +
-                                       0.5*nu*dt*idy2*(W[x0, ym1, z0] + W[x0, yp1, z0]) +
-                                       0.5*nu*dt*idz2*(W[x0, y0, zm1] + W[x0, y0, zp1]))         
+        if nuFlag:
+            W[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                xix2[0] * ihx2[0] * (W[xp1, y0, z0] + W[xm1, y0, z0]) +
+                                xixx[0] * i2hx[0] * (W[xp1, y0, z0] - W[xm1, y0, z0]) +
+                                ety2[0] * ihy2[0] * (W[x0, yp1, z0] + W[x0, ym1, z0]) +
+                                etyy[0] * i2hy[0] * (W[x0, yp1, z0] - W[x0, ym1, z0]) +
+                                ztz2[0] * ihz2[0] * (W[x0, y0, zp1] + W[x0, y0, zm1]) +
+                                ztzz[0] * i2hz[0] * (W[x0, y0, zp1] - W[x0, y0, zm1]))
+                            ) / (1 + nu*dt*(ihx2[0]*xix2[0] + ihy2[0]*ety2[0] + ihz2[0]*ztz2[0]))
+        else:
+            W[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*nu*dt*(
+                                ihx2[0] * (W[xp1, y0, z0] + W[xm1, y0, z0]) +
+                                ihy2[0] * (W[x0, yp1, z0] + W[x0, ym1, z0]) +
+                                ihz2[0] * (W[x0, y0, zp1] + W[x0, y0, zm1]))) / (1 + nu*dt*(ihx2[0] + ihy2[0] + ihz2[0]))
 
         imposeWBCs(W)
 
-        locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (W[x0, y0, z0] - 0.5*nu*dt*(
-                        (W[xm1, y0, z0] - 2.0*W[x0, y0, z0] + W[xp1, y0, z0])/hx2 +
-                        (W[x0, ym1, z0] - 2.0*W[x0, y0, z0] + W[x0, yp1, z0])/hy2 +
-                        (W[x0, y0, zm1] - 2.0*W[x0, y0, z0] + W[x0, y0, zp1])/hz2))))
+        if nuFlag:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (W[x0, y0, z0] - 0.5*nu*dt*(
+                               xix2[0] * ihx2[0] * (W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0]) + 
+                               xixx[0] * i2hx[0] * (W[xp1, y0, z0] - W[xm1, y0, z0]) + 
+                               ety2[0] * ihy2[0] * (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0]) + 
+                               etyy[0] * i2hy[0] * (W[x0, yp1, z0] - W[x0, ym1, z0]) + 
+                               ztz2[0] * ihz2[0] * (W[x0, y0, zp1] - 2.0*W[x0, y0, z0] + W[x0, y0, zm1]) +
+                               ztzz[0] * i2hz[0] * (W[x0, y0, zp1] - W[x0, y0, zm1])))))
+        else:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (W[x0, y0, z0] - 0.5*nu*dt*(
+                                (W[xp1, y0, z0] - 2.0*W[x0, y0, z0] + W[xm1, y0, z0])*ihx2[0] +
+                                (W[x0, yp1, z0] - 2.0*W[x0, y0, z0] + W[x0, ym1, z0])*ihy2[0] +
+                                (W[x0, y0, zp1] - 2.0*W[x0, y0, z0] + W[x0, y0, zm1])*ihz2[0]))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -437,20 +561,43 @@ def wJacobi(rho):
 
 def TJacobi(rho):
     global dt
+    global kappa
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xixx, xix2, etyy, ety2, ztzz, ztz2
 
     jCnt = 0
     while True:
-        T[x0, y0, z0] = (1.0/(1 + kappa*dt*(idx2 + idy2 + idz2))) * (rho[x0, y0, z0] + 
-                                       0.5*kappa*dt*idx2*(T[xm1, y0, z0] + T[xp1, y0, z0]) +
-                                       0.5*kappa*dt*idy2*(T[x0, ym1, z0] + T[x0, yp1, z0]) +
-                                       0.5*kappa*dt*idz2*(T[x0, y0, zm1] + T[x0, y0, zp1])) 
+        if nuFlag:
+            T[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*kappa*dt*(
+                                xix2[0] * ihx2[0] * (T[xp1, y0, z0] + T[xm1, y0, z0]) +
+                                xixx[0] * i2hx[0] * (T[xp1, y0, z0] - T[xm1, y0, z0]) +
+                                ety2[0] * ihy2[0] * (T[x0, yp1, z0] + T[x0, ym1, z0]) +
+                                etyy[0] * i2hy[0] * (T[x0, yp1, z0] - T[x0, ym1, z0]) +
+                                ztz2[0] * ihz2[0] * (T[x0, y0, zp1] + T[x0, y0, zm1]) +
+                                ztzz[0] * i2hz[0] * (T[x0, y0, zp1] - T[x0, y0, zm1]))
+                            ) / (1 + kappa*dt*(ihx2[0]*xix2[0] + ihy2[0]*ety2[0] + ihz2[0]*ztz2[0]))
+        else:
+            T[x0, y0, z0] = (rho[x0, y0, z0] + 0.5*kappa*dt*(
+                                ihx2[0] * (T[xp1, y0, z0] + T[xm1, y0, z0]) +
+                                ihy2[0] * (T[x0, yp1, z0] + T[x0, ym1, z0]) +
+                                ihz2[0] * (T[x0, y0, zp1] + T[x0, y0, zm1]))) / (1 + kappa*dt*(ihx2[0] + ihy2[0] + ihz2[0]))
 
         imposeTBCs(T)
 
-        locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (T[x0, y0, z0] - 0.5*kappa*dt*(
-                        (T[xm1, y0, z0] - 2.0*T[x0, y0, z0] + T[xp1, y0, z0])/hx2 +
-                        (T[x0, ym1, z0] - 2.0*T[x0, y0, z0] + T[x0, yp1, z0])/hy2 +
-                        (T[x0, y0, zm1] - 2.0*T[x0, y0, z0] + T[x0, y0, zp1])/hz2))))
+        if nuFlag:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (T[x0, y0, z0] - 0.5*kappa*dt*(
+                               xix2[0] * ihx2[0] * (T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0]) + 
+                               xixx[0] * i2hx[0] * (T[xp1, y0, z0] - T[xm1, y0, z0]) + 
+                               ety2[0] * ihy2[0] * (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0]) + 
+                               etyy[0] * i2hy[0] * (T[x0, yp1, z0] - T[x0, ym1, z0]) + 
+                               ztz2[0] * ihz2[0] * (T[x0, y0, zp1] - 2.0*T[x0, y0, z0] + T[x0, y0, zm1]) +
+                               ztzz[0] * i2hz[0] * (T[x0, y0, zp1] - T[x0, y0, zm1])))))
+        else:
+            locmaxErr = np.amax(np.fabs(rho[x0, y0, z0] - (T[x0, y0, z0] - 0.5*kappa*dt*(
+                                (T[xp1, y0, z0] - 2.0*T[x0, y0, z0] + T[xm1, y0, z0])*ihx2[0] +
+                                (T[x0, yp1, z0] - 2.0*T[x0, y0, z0] + T[x0, ym1, z0])*ihy2[0] +
+                                (T[x0, y0, zp1] - 2.0*T[x0, y0, z0] + T[x0, y0, zm1])*ihz2[0]))))
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
@@ -898,9 +1045,9 @@ def initGrid():
     global VDepth
     global hx, hy, hz
     global hyhz, hzhx, hxhy, hxhyhz, gsFactor
-    global mghx, xPts, i2hx, ihx2, xixx, xix2
-    global mghy, yPts, i2hy, ihy2, etyy, ety2
-    global mghz, zPts, i2hz, ihz2, ztzz, ztz2
+    global mghx, xPts, i2hx, ihx2, xi_x, xixx, xix2
+    global mghy, yPts, i2hy, ihy2, et_y, etyy, ety2
+    global mghz, zPts, i2hz, ihz2, zt_z, ztzz, ztz2
 
     hx0 = 1.0/(N[0][0])
     hy0 = 1.0/(N[0][1])
@@ -997,9 +1144,11 @@ def initGrid():
             zPts[i] -= 0.5
 
     # Reshape arrays to make it easier to multiply with 3D arrays
+    xi_x = [x[:, np.newaxis, np.newaxis] for x in xi_x]
     xixx = [x[:, np.newaxis, np.newaxis] for x in xixx]
     xix2 = [x[:, np.newaxis, np.newaxis] for x in xix2]
 
+    et_y = [x[:, np.newaxis] for x in et_y]
     etyy = [x[:, np.newaxis] for x in etyy]
     ety2 = [x[:, np.newaxis] for x in ety2]
 
@@ -1008,7 +1157,12 @@ def initGrid():
 
 
 def main():
+    global nuFlag
     global dt, cflNo
+    global U, V, W, P, T
+    global i2hx, i2hy, i2hz
+    global xi_x, et_y, zt_z
+    global Hx, Hy, Hz, Ht, Pp
 
     iCnt = 0
     time = 0
@@ -1020,6 +1174,7 @@ def main():
     initMGArrays()
 
     rhs = np.zeros([xSize, Ny+2, Nz+2])
+    gradP = np.zeros([xSize, Ny+2, Nz+2])
 
     t1 = datetime.now()
 
@@ -1052,29 +1207,55 @@ def main():
         Hz[x0, y0, z0] = computeNLinDiff_Z(U, V, W)
         Ht[x0, y0, z0] = computeNLinDiff_T(U, V, W, T)  
 
-        Hx[x0, y0, z0] = U[x0, y0, z0] + dt*(Hx[x0, y0, z0] - np.sqrt((Ta*Pr)/Ra)*(-V[x0, y0, z0]) - (P[xp1, y0, z0] - P[xm1, y0, z0])/(2.0*hx))
+        if nuFlag:
+            gradP[x0, y0, z0] = (P[xp1, y0, z0] - P[xm1, y0, z0]) * xi_x[0] * i2hx[0]
+        else:
+            gradP[x0, y0, z0] = (P[xp1, y0, z0] - P[xm1, y0, z0]) * i2hx[0]
+
+        Hx = U + dt*(Hx - np.sqrt((Ta*Pr)/Ra)*(-V) - gradP)
         uJacobi(Hx)
 
-        Hy[x0, y0, z0] = V[x0, y0, z0] + dt*(Hy[x0, y0, z0] - np.sqrt((Ta*Pr)/Ra)*( U[x0, y0, z0]) - (P[x0, yp1, z0] - P[x0, ym1, z0])/(2.0*hy))
+        if nuFlag:
+            gradP[x0, y0, z0] = (P[x0, yp1, z0] - P[x0, ym1, z0]) * et_y[0] * i2hy[0]
+        else:
+            gradP[x0, y0, z0] = (P[x0, yp1, z0] - P[x0, ym1, z0]) * i2hy[0]
+
+        Hy = V + dt*(Hy - np.sqrt((Ta*Pr)/Ra)*(U) - gradP)
         vJacobi(Hy)
 
-        Hz[x0, y0, z0] = W[x0, y0, z0] + dt*(Hz[x0, y0, z0] + T[x0, y0, z0] - (P[x0, y0, zp1] - P[x0, y0, zm1])/(2.0*hz))
+        if nuFlag:
+            gradP[x0, y0, z0] = (P[x0, y0, zp1] - P[x0, y0, zm1]) * zt_z[0] * i2hz[0]
+        else:
+            gradP[x0, y0, z0] = (P[x0, y0, zp1] - P[x0, y0, zm1]) * i2hz[0]
+
+        Hz = W + dt*(Hz + T - gradP)
         wJacobi(Hz)
 
-        Ht[x0, y0, z0] = T[x0, y0, z0] + dt*Ht[x0, y0, z0]
+        Ht = T + dt*Ht
         TJacobi(Ht)   
 
         rhs.fill(0.0)
-        rhs[x0, y0, z0] = ((U[xp1, y0, z0] - U[xm1, y0, z0])/(2.0*hx) +
-                           (V[x0, yp1, z0] - V[x0, ym1, z0])/(2.0*hy) +
-                           (W[x0, y0, zp1] - W[x0, y0, zm1])/(2.0*hz))/dt
+        if nuFlag:
+            rhs[x0, y0, z0] = ((U[xp1, y0, z0] - U[xm1, y0, z0]) * xi_x[0] * i2hx[0] +
+                               (V[x0, yp1, z0] - V[x0, ym1, z0]) * et_y[0] * i2hy[0] +
+                               (W[x0, y0, zp1] - W[x0, y0, zm1]) * zt_z[0] * i2hz[0])/dt
+        else:
+            rhs[x0, y0, z0] = ((U[xp1, y0, z0] - U[xm1, y0, z0]) * i2hx[0] +
+                               (V[x0, yp1, z0] - V[x0, ym1, z0]) * i2hy[0] +
+                               (W[x0, y0, zp1] - W[x0, y0, zm1]) * i2hz[0])/dt
 
         Pp = multigrid(rhs)
 
         P[x0, y0, z0] = P[x0, y0, z0] + Pp[x0, y0, z0]
-        U[x0, y0, z0] = U[x0, y0, z0] - dt*(Pp[xp1, y0, z0] - Pp[xm1, y0, z0])/(2.0*hx)
-        V[x0, y0, z0] = V[x0, y0, z0] - dt*(Pp[x0, yp1, z0] - Pp[x0, ym1, z0])/(2.0*hy)
-        W[x0, y0, z0] = W[x0, y0, z0] - dt*(Pp[x0, y0, zp1] - Pp[x0, y0, zm1])/(2.0*hz)
+
+        if nuFlag:
+            U[x0, y0, z0] = U[x0, y0, z0] - dt * (Pp[xp1, y0, z0] - Pp[xm1, y0, z0]) * xi_x[0] * i2hx[0]
+            V[x0, y0, z0] = V[x0, y0, z0] - dt * (Pp[x0, yp1, z0] - Pp[x0, ym1, z0]) * et_y[0] * i2hy[0]
+            W[x0, y0, z0] = W[x0, y0, z0] - dt * (Pp[x0, y0, zp1] - Pp[x0, y0, zm1]) * zt_z[0] * i2hz[0]
+        else:
+            U[x0, y0, z0] = U[x0, y0, z0] - dt * (Pp[xp1, y0, z0] - Pp[xm1, y0, z0]) * i2hx[0]
+            V[x0, y0, z0] = V[x0, y0, z0] - dt * (Pp[x0, yp1, z0] - Pp[x0, ym1, z0]) * i2hy[0]
+            W[x0, y0, z0] = W[x0, y0, z0] - dt * (Pp[x0, y0, zp1] - Pp[x0, y0, zm1]) * i2hz[0]
 
         imposeUBCs(U)
         imposeVBCs(V)
