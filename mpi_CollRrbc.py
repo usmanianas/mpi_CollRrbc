@@ -1144,9 +1144,9 @@ def initGrid():
             zPts[i] -= 0.5
 
     # Reshape arrays to make it easier to multiply with 3D arrays
-    xi_x = [x[:, np.newaxis, np.newaxis] for x in xi_x]
-    xixx = [x[:, np.newaxis, np.newaxis] for x in xixx]
-    xix2 = [x[:, np.newaxis, np.newaxis] for x in xix2]
+    xi_x = [x[int(rank*len(x)/nprocs):int((rank + 1)*len(x)/nprocs), np.newaxis, np.newaxis] for x in xi_x]
+    xixx = [x[int(rank*len(x)/nprocs):int((rank + 1)*len(x)/nprocs), np.newaxis, np.newaxis] for x in xixx]
+    xix2 = [x[int(rank*len(x)/nprocs):int((rank + 1)*len(x)/nprocs), np.newaxis, np.newaxis] for x in xix2]
 
     et_y = [x[:, np.newaxis] for x in et_y]
     etyy = [x[:, np.newaxis] for x in etyy]
