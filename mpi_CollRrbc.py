@@ -23,6 +23,9 @@ sInd = np.array([5, 5, 5])
 # Flag to switch between uniform and non-uniform grid with tan-hyp stretching
 nuFlag = False
 
+# Flag to turn spiral-vortex LES model on/off
+lesFlag = True
+
 # Stretching parameter for tangent-hyperbolic grid
 beta = 1.0
 
@@ -47,6 +50,9 @@ pstSm = 4
 
 # Tolerance value for iterative solver
 tolerance = 1.0e-5
+
+# Flag to enable/disable restart of solver from previous solution file
+restartFlag = True
 
 # Time step
 dt = 0.01
@@ -155,9 +161,10 @@ if rootRank:
 
 ############# Fields Initialization ###########
 
-def initFields():
-    global Hx, Hy, Hz, Ht, Pp
+def initFields(time):
+    global restartFlag
     global U, V, W, P, T
+    global Hx, Hy, Hz, Ht, Pp
 
     # Field variables
     U = np.zeros([xSize, Ny+2, Nz+2])
@@ -180,6 +187,9 @@ def initFields():
     P.fill(1.0)
     #T[:, :, :] = 1 - zCord[:]
 
+    if restartFlag:
+        time = readSoln(U, V, W, P, T)
+
     # Impose BCs
     imposeUBCs(U)
     imposeVBCs(V)
@@ -188,7 +198,7 @@ def initFields():
     imposeTBCs(T)
 
 
-###############################################
+################### File I/O ##################
 
 
 def writeSoln(U, V, W, P, T, time):
@@ -207,9 +217,9 @@ def writeSoln(U, V, W, P, T, time):
     if mpiH5Py:
         f = hp.File(fName, "w", driver='mpio', comm=comm)
 
-        uDset = f.create_dataset("U", dShape, dtype = 'f')
-        vDset = f.create_dataset("V", dShape, dtype = 'f')
-        wDset = f.create_dataset("W", dShape, dtype = 'f')
+        uDset = f.create_dataset("Vx", dShape, dtype = 'f')
+        vDset = f.create_dataset("Vy", dShape, dtype = 'f')
+        wDset = f.create_dataset("Vz", dShape, dtype = 'f')
         tDset = f.create_dataset("T", dShape, dtype = 'f')
         pDset = f.create_dataset("P", dShape, dtype = 'f')
 
@@ -230,17 +240,17 @@ def writeSoln(U, V, W, P, T, time):
         dFull = comm.gather(U[1:-1, 1:-1, 1:-1], root=0)
         if rootRank:
             dFull = np.concatenate(dFull)
-            dDset = f.create_dataset("U", data = dFull)
+            dDset = f.create_dataset("Vx", data = dFull)
 
         dFull = comm.gather(V[1:-1, 1:-1, 1:-1], root=0)
         if rootRank:
             dFull = np.concatenate(dFull)
-            dDset = f.create_dataset("V", data = dFull)
+            dDset = f.create_dataset("Vy", data = dFull)
 
         dFull = comm.gather(W[1:-1, 1:-1, 1:-1], root=0)
         if rootRank:
             dFull = np.concatenate(dFull)
-            dDset = f.create_dataset("W", data = dFull)
+            dDset = f.create_dataset("Vz", data = dFull)
 
         dFull = comm.gather(T[1:-1, 1:-1, 1:-1], root=0)
         if rootRank:
@@ -254,6 +264,54 @@ def writeSoln(U, V, W, P, T, time):
 
         if rootRank:
             f.close()
+
+
+def readSoln(U, V, W, P, T):
+    global mpiH5Py
+    global gSt, gEn
+    global rootRank
+
+    fName = "restartFile.h5"
+    if rootRank:
+        print("#Reading from file: ", fName)        
+
+    if mpiH5Py:
+        if rootRank:
+            print("Parallel file read is not implemented")
+        quit()
+        '''
+        f = hp.File(fName, "w", driver='mpio', comm=comm)
+
+        uDset = f.create_dataset("U", dShape, dtype = 'f')
+        vDset = f.create_dataset("V", dShape, dtype = 'f')
+        wDset = f.create_dataset("W", dShape, dtype = 'f')
+        tDset = f.create_dataset("T", dShape, dtype = 'f')
+        pDset = f.create_dataset("P", dShape, dtype = 'f')
+
+        for rCnt in range(nprocs):
+            if rCnt == rank:
+                uDset[gSt:gEn,:,:] = U[1:-1, 1:-1, 1:-1]
+                vDset[gSt:gEn,:,:] = V[1:-1, 1:-1, 1:-1]
+                wDset[gSt:gEn,:,:] = W[1:-1, 1:-1, 1:-1]
+                tDset[gSt:gEn,:,:] = T[1:-1, 1:-1, 1:-1]
+                pDset[gSt:gEn,:,:] = P[1:-1, 1:-1, 1:-1]
+
+        f.close()
+        '''
+
+    else:
+        f = hp.File(fName, "r")
+
+        U[1:-1, 1:-1, 1:-1] = np.array(f["Vx"])[gSt:gEn, :, :]
+        V[1:-1, 1:-1, 1:-1] = np.array(f["Vy"])[gSt:gEn, :, :]
+        W[1:-1, 1:-1, 1:-1] = np.array(f["Vz"])[gSt:gEn, :, :]
+        P[1:-1, 1:-1, 1:-1] = np.array(f["P"])[gSt:gEn, :, :]
+        T[1:-1, 1:-1, 1:-1] = np.array(f["T"])[gSt:gEn, :, :]
+        time = np.array(f["Time"])
+
+        f.close()
+
+    return time
 
 
 def getDiv(U, V, W):
@@ -291,9 +349,10 @@ def data_transfer(F):
 ############### Nonlinear and Diffusion Calculations ###############
 
 
-def computeNLinDiff_X(U, V, W):
+def computeNLinDiff_X():
     global Hx, nu
     global nuFlag
+    global U, V, W
     global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
     global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
@@ -315,12 +374,11 @@ def computeNLinDiff_X(U, V, W):
                             V[x0, y0, z0]*(U[x0, yp1, z0] - U[x0, ym1, z0])*i2hy[0] - 
                             W[x0, y0, z0]*(U[x0, y0, zp1] - U[x0, y0, zm1])*i2hz[0])
 
-    return Hx[x0, y0, z0]
 
-
-def computeNLinDiff_Y(U, V, W):
+def computeNLinDiff_Y():
     global Hy, nu
     global nuFlag
+    global U, V, W
     global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
     global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
@@ -342,12 +400,11 @@ def computeNLinDiff_Y(U, V, W):
                             V[x0, y0, z0]*(V[x0, yp1, z0] - V[x0, ym1, z0])*i2hy[0] - 
                             W[x0, y0, z0]*(V[x0, y0, zp1] - V[x0, y0, zm1])*i2hz[0])
 
-    return Hy[x0, y0, z0]
 
-
-def computeNLinDiff_Z(U, V, W):
+def computeNLinDiff_Z():
     global Hz, nu
     global nuFlag
+    global U, V, W
     global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
     global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
@@ -369,13 +426,12 @@ def computeNLinDiff_Z(U, V, W):
                             V[x0, y0, z0]*(W[x0, yp1, z0] - W[x0, ym1, z0])*i2hy[0] - 
                             W[x0, y0, z0]*(W[x0, y0, zp1] - W[x0, y0, zm1])*i2hz[0])
 
-    return Hz[x0, y0, z0]
 
-
-def computeNLinDiff_T(U, V, W, T):
+def computeNLinDiff_T():
     global Ht
     global kappa
     global nuFlag
+    global U, V, W, T
     global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
     global xi_x, xixx, xix2, et_y, etyy, ety2, zt_z, ztzz, ztz2
 
@@ -396,8 +452,6 @@ def computeNLinDiff_T(U, V, W, T):
                             U[x0, y0, z0]*(T[xp1, y0, z0] - T[xm1, y0, z0])*i2hx[0]-
                             V[x0, y0, z0]*(T[x0, yp1, z0] - T[x0, ym1, z0])*i2hy[0] - 
                             W[x0, y0, z0]*(T[x0, y0, zp1] - T[x0, y0, zm1])*i2hz[0])
-
-    return Ht[x0, y0, z0]
 
 
 ############### Iterative Solvers ###############
@@ -610,6 +664,153 @@ def TJacobi(rho):
             quit()
     
     return T[x0, y0, z0]       
+
+
+####### Stretch Spiral Vortex LES Model ########
+
+
+def computeSGS():
+    global N
+    global nuFlag
+    global U, V, W
+    global Hx, Hy, Hz
+    global i2hx, i2hy, i2hz
+    global xi_x, et_y, zt_z
+
+    n = N[0]
+
+    Sxx = np.zeros(n)
+    Syy = np.zeros(n)
+    Szz = np.zeros(n)
+    Sxy = np.zeros(n)
+    Syz = np.zeros(n)
+    Szx = np.zeros(n)
+
+    if nuFlag:
+        Sxx = (U[xp1, y0, z0] - U[xm1, y0, z0]) * xi_x[0] * i2hx[0]
+        Syy = (V[x0, yp1, z0] - V[x0, ym1, z0]) * et_y[0] * i2hy[0]
+        Szz = (W[x0, y0, zp1] - W[x0, y0, zm1]) * zt_z[0] * i2hz[0]
+
+        Sxy = ((U[x0, yp1, z0] - U[x0, ym1, z0]) * et_y[0] * i2hy[0] + (V[xp1, y0, z0] - V[xm1, y0, z0]) * xi_x[0] * i2hx[0])/2.0
+        Syz = ((V[x0, y0, zp1] - V[x0, y0, zm1]) * zt_z[0] * i2hz[0] + (W[x0, yp1, z0] - W[x0, ym1, z0]) * et_y[0] * i2hy[0])/2.0
+        Szx = ((W[xp1, y0, z0] - W[xm1, y0, z0]) * xi_x[0] * i2hx[0] + (U[x0, y0, zp1] - U[x0, y0, zm1]) * zt_z[0] * i2hz[0])/2.0
+    else:
+        Sxx = (U[xp1, y0, z0] - U[xm1, y0, z0]) * i2hx[0]
+        Syy = (V[x0, yp1, z0] - V[x0, ym1, z0]) * i2hy[0]
+        Szz = (W[x0, y0, zp1] - W[x0, y0, zm1]) * i2hz[0]
+
+        Sxy = ((U[x0, yp1, z0] - U[x0, ym1, z0]) * i2hy[0] + (V[xp1, y0, z0] - V[xm1, y0, z0]) * i2hx[0])/2.0
+        Syz = ((V[x0, y0, zp1] - V[x0, y0, zm1]) * i2hz[0] + (W[x0, yp1, z0] - W[x0, ym1, z0]) * i2hy[0])/2.0
+        Szx = ((W[xp1, y0, z0] - W[xm1, y0, z0]) * i2hx[0] + (U[x0, y0, zp1] - U[x0, y0, zm1]) * i2hz[0])/2.0
+
+    a = -(Sxx + Syy + Szz)
+    b = Sxx*Syy - Sxy*Sxy + Syy*Szz - Syz*Syz + Szz*Sxx - Szx*Szx
+    c = -(Sxx*(Syy*Szz - Syz*Syz) - Sxy*(Sxy*Szz - Syz*Szx) + Szx*(Sxy*Syz - Syy*Szx))
+
+    q = (3.0*b - a*a)/9.0
+    r = (9.0*a*b - 27.0*c - 2.0*a*a*a)/54.0
+
+    if np.any(q >= 0.0):
+        print("q is non-negative in eigenvalue calculation. Aborting")
+        quit()
+
+    costheta = r/np.sqrt(-q*q*q)
+    theta = np.zeros_like(costheta)
+
+    theta[costheta < -1.0] = np.pi
+    theta[(costheta > -1.0) & (costheta < 1.0)] = np.arccos(costheta[(costheta > -1.0) & (costheta < 1.0)])
+
+    # Array of eigenvalues as a 4D array
+    eigvals = np.zeros([n[0], n[1], n[2], 3])
+    eigvals[:,:,:,0] = 2.0*np.sqrt(-q)*np.cos((theta            )/3.0) - a/3.0
+    eigvals[:,:,:,1] = 2.0*np.sqrt(-q)*np.cos((theta + 2.0*np.pi)/3.0) - a/3.0
+    eigvals[:,:,:,2] = 2.0*np.sqrt(-q)*np.cos((theta + 4.0*np.pi)/3.0) - a/3.0
+
+    # Sort array along last dimension - i.e. sort eigenvalues
+    eigvals.sort()
+
+    # Choose the largest eigenvalues
+    eigvals = eigvals[:,:,:,-1]
+
+    det = np.zeros([n[0], n[1], n[2], 3])
+    det[:,:,:,0] = (Syy - eigvals) * (Szz - eigvals) - Syz*Syz
+    det[:,:,:,1] = (Szz - eigvals) * (Sxx - eigvals) - Szx*Szx
+    det[:,:,:,2] = (Sxx - eigvals) * (Syy - eigvals) - Sxy*Sxy
+
+    fdet = np.fabs(det)
+
+    e = np.zeros_like(det)
+    a = -Sxy*(Szz - eigvals) + Syz*Szx
+    b = -Szx*(Syy - eigvals) + Sxy*Syz
+    c = -Syz*(Sxx - eigvals) + Sxy*Szx
+
+    miArray = np.argmax(fdet, axis=3)
+
+    for i in range(n[0]):
+        for j in range(n[1]):
+            for k in range(n[2]):
+                if miArray[i, j, k] == 0:
+                    e[i, j, k, :] = np.array([1.0, a[i, j, k]/det[i, j, k, 0], b[i, j, k]/det[i, j, k, 0]])
+                elif miArray[i, j, k] == 1:
+                    e[i, j, k, :] = np.array([a[i, j, k]/det[i, j, k, 1], 1.0, c[i, j, k]/det[i, j, k, 1]])
+                elif miArray[i, j, k] == 2:
+                    e[i, j, k, :] = np.array([b[i, j, k]/det[i, j, k, 2], c[i, j, k]/det[i, j, k, 2], 1.0])
+
+    e /= np.linalg.norm(e, axis=3)[:,:,:,np.newaxis]
+
+    a = Sxx*e[:,:,:,0]**2.0 + Syy*e[:,:,:,1]**2.0 + Szz*e[:,:,:,2]**2.0 + 2.0*(
+        Sxy*e[:,:,:,0]*e[:,:,:,1] + Syz*e[:,:,:,1]*e[:,:,:,2] + Szx*e[:,:,:,2]*e[:,:,:,0])
+
+    lv = np.sqrt(2.0*nu/(3.0*np.abs(a)))
+
+    q.fill(0.0)
+    r.fill(0.0)
+
+    # Temporary hack  - works for uniform grids only
+    hDel = xCord[1] - xCord[0]
+    for i in range(-1, 2):
+        dx = xCord[xSt+i:xEn+i, np.newaxis, np.newaxis] - xCord[xSt:xEn, np.newaxis, np.newaxis]
+        for j in range(-1, 2):
+            dy = yCord[ySt+j:yEn+j, np.newaxis] - yCord[ySt:yEn, np.newaxis]
+            for k in range(-1, 2):
+                dz = zCord[zSt+k:zEn+k] - zCord[zSt:zEn]
+                if (i or j or k):
+                    a = U[xSt+i:xEn+i, ySt+j:yEn+j, zSt+k:zEn+k] - U[xSt:xEn, ySt:yEn, zSt:zEn]
+                    b = V[xSt+i:xEn+i, ySt+j:yEn+j, zSt+k:zEn+k] - V[xSt:xEn, ySt:yEn, zSt:zEn]
+                    c = W[xSt+i:xEn+i, ySt+j:yEn+j, zSt+k:zEn+k] - W[xSt:xEn, ySt:yEn, zSt:zEn]
+                    q += a*a + b*b + c*c
+
+                    dx2 = dx*dx + dy*dy + dz*dz
+                    dxe = dx*e[:,:,:,0] + dy*e[:,:,:,1] + dz*e[:,:,:,2]
+
+                    d = np.sqrt(dx2 - dxe*dxe)/hDel
+                    d2 = d*d
+                    r[d < 0.873469] += 7.4022*d2[d < 0.873469] - 1.82642*d2[d < 0.873469]*d2[d < 0.873469]
+                    r[d >= 0.873469] += (12.2946*np.power(d[d >= 0.873469], 2.0/3.0) - 6.0 -
+                                        0.573159*np.power(d[d >= 0.873469], -1.5)*np.sin(3.14159*d[d >= 0.873469] - 0.785398))
+
+    q /= 26.0
+    r /= 26.0
+
+    prefac = q/r
+    kc = np.pi/hDel
+
+    q = (kc*lv)**2.0
+
+    r[q < 2.42806] = ((3.0 +   2.5107*q[q < 2.42806] +  0.330357*(q[q < 2.42806]**2.0) +  0.0295481*(q[q < 2.42806]**3.0))/
+                      (1.0 + 0.336901*q[q < 2.42806] + 0.0416684*(q[q < 2.42806]**2.0) + 0.00187191*(q[q < 2.42806]**3.0)) -
+                     4.06235*np.power(q[q < 2.42806], 1.0/3.0))/2.0
+
+    r[q >= 2.42806] = ((1.26429 + 0.835714*q[q >= 2.42806] + 0.0964286*(q[q >= 2.42806]**2.0))*np.exp(-q[q >= 2.42806])/
+                       (2.0     +      4.5*q[q >= 2.42806] +  1.928572*(q[q >= 2.42806]**2.0) + 0.1928572*(q[q >= 2.42806]**3.0)))
+
+    K = prefac*r
+    print(np.min(r))
+    print(np.max(r))
+    print(r[4, 5, 6])
+    quit()
+
+
 
 
 ############### Multigrid Solver ###############
@@ -1158,6 +1359,7 @@ def initGrid():
 
 def main():
     global nuFlag
+    global lesFlag
     global dt, cflNo
     global U, V, W, P, T
     global i2hx, i2hy, i2hz
@@ -1170,7 +1372,7 @@ def main():
     dtnew = 1.0e10
 
     initGrid()
-    initFields()
+    initFields(time)
     initMGArrays()
 
     rhs = np.zeros([xSize, Ny+2, Nz+2])
@@ -1202,10 +1404,13 @@ def main():
             
         dt = min(dtnew, dt)
 
-        Hx[x0, y0, z0] = computeNLinDiff_X(U, V, W)
-        Hy[x0, y0, z0] = computeNLinDiff_Y(U, V, W)
-        Hz[x0, y0, z0] = computeNLinDiff_Z(U, V, W)
-        Ht[x0, y0, z0] = computeNLinDiff_T(U, V, W, T)  
+        computeNLinDiff_X()
+        computeNLinDiff_Y()
+        computeNLinDiff_Z()
+        computeNLinDiff_T()  
+
+        if lesFlag:
+            computeSGS()
 
         if nuFlag:
             gradP[x0, y0, z0] = (P[xp1, y0, z0] - P[xm1, y0, z0]) * xi_x[0] * i2hx[0]
