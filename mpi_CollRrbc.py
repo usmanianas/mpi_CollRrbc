@@ -24,7 +24,7 @@ sInd = np.array([5, 5, 5])
 nuFlag = False
 
 # Flag to turn spiral-vortex LES model on/off
-lesFlag = True
+lesFlag = False
 
 # Stretching parameter for tangent-hyperbolic grid
 beta = 1.0
@@ -52,7 +52,7 @@ pstSm = 4
 tolerance = 1.0e-5
 
 # Flag to enable/disable restart of solver from previous solution file
-restartFlag = True
+restartFlag = False
 
 # Time step
 dt = 0.01
@@ -61,7 +61,7 @@ dt = 0.01
 cflNo = 0.5
 
 # Final time
-tMax = 0.1
+tMax = 0.2
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
@@ -161,7 +161,9 @@ if rootRank:
 
 ############# Fields Initialization ###########
 
-def initFields(time):
+def initFields():
+    global tMax
+    global rootRank
     global restartFlag
     global U, V, W, P, T
     global Hx, Hy, Hz, Ht, Pp
@@ -187,8 +189,14 @@ def initFields(time):
     P.fill(1.0)
     #T[:, :, :] = 1 - zCord[:]
 
+    time = 0.0
     if restartFlag:
         time = readSoln(U, V, W, P, T)
+
+    if time > tMax:
+        if rootRank:
+            print("ERROR: Restart file starts beyond the maximum time limit set. Aborting")
+        quit()
 
     # Impose BCs
     imposeUBCs(U)
@@ -196,6 +204,8 @@ def initFields(time):
     imposeWBCs(W)
     imposePBCs(P)
     imposeTBCs(T)
+
+    return time
 
 
 ################### File I/O ##################
@@ -783,6 +793,7 @@ def computeSGS():
                     dx2 = dx*dx + dy*dy + dz*dz
                     dxe = dx*e[:,:,:,0] + dy*e[:,:,:,1] + dz*e[:,:,:,2]
 
+                    # Structure function integral
                     d = np.sqrt(dx2 - dxe*dxe)/hDel
                     d2 = d*d
                     r[d < 0.873469] += 7.4022*d2[d < 0.873469] - 1.82642*d2[d < 0.873469]*d2[d < 0.873469]
@@ -797,6 +808,7 @@ def computeSGS():
 
     q = (kc*lv)**2.0
 
+    # Sub-grid kinetic energy integral
     r[q < 2.42806] = ((3.0 +   2.5107*q[q < 2.42806] +  0.330357*(q[q < 2.42806]**2.0) +  0.0295481*(q[q < 2.42806]**3.0))/
                       (1.0 + 0.336901*q[q < 2.42806] + 0.0416684*(q[q < 2.42806]**2.0) + 0.00187191*(q[q < 2.42806]**3.0)) -
                      4.06235*np.power(q[q < 2.42806], 1.0/3.0))/2.0
@@ -805,10 +817,43 @@ def computeSGS():
                        (2.0     +      4.5*q[q >= 2.42806] +  1.928572*(q[q >= 2.42806]**2.0) + 0.1928572*(q[q >= 2.42806]**3.0)))
 
     K = prefac*r
-    print(np.min(r))
-    print(np.max(r))
-    print(r[4, 5, 6])
-    quit()
+
+    Sxx = (1.0 - e[:,:,:,0]*e[:,:,:,0])*K
+    Syy = (1.0 - e[:,:,:,1]*e[:,:,:,1])*K
+    Szz = (1.0 - e[:,:,:,2]*e[:,:,:,2])*K
+    Sxy = (      e[:,:,:,0]*e[:,:,:,1])*K
+    Syz = (      e[:,:,:,1]*e[:,:,:,2])*K
+    Szx = (      e[:,:,:,2]*e[:,:,:,0])*K
+
+    Sxx = np.pad(Sxx, 1)
+    Syy = np.pad(Syy, 1)
+    Szz = np.pad(Szz, 1)
+    Sxy = np.pad(Sxy, 1)
+    Syz = np.pad(Syz, 1)
+    Szx = np.pad(Szx, 1)
+
+    data_transfer(Sxx)
+    data_transfer(Syy)
+    data_transfer(Szz)
+    data_transfer(Sxy)
+    data_transfer(Syz)
+    data_transfer(Szx)
+
+    if nuFlag:
+        U[x0, y0, z0] += (Sxx[xp1, y0, z0] - Sxx[xm1, y0, z0])*xi_x[0]*i2hx[0] + (Sxy[x0, yp1, z0] - Sxy[x0, ym1, z0])*et_y[0]*i2hy[0] + (Szx[x0, y0, zp1] - Szx[x0, y0, zm1])*zt_z[0]*i2hz[0]
+        V[x0, y0, z0] += (Sxy[xp1, y0, z0] - Sxy[xm1, y0, z0])*xi_x[0]*i2hx[0] + (Syy[x0, yp1, z0] - Syy[x0, ym1, z0])*et_y[0]*i2hy[0] + (Syz[x0, y0, zp1] - Syz[x0, y0, zm1])*zt_z[0]*i2hz[0]
+        W[x0, y0, z0] += (Szx[xp1, y0, z0] - Szx[xm1, y0, z0])*xi_x[0]*i2hx[0] + (Syz[x0, yp1, z0] - Syz[x0, ym1, z0])*et_y[0]*i2hy[0] + (Szz[x0, y0, zp1] - Szz[x0, y0, zm1])*zt_z[0]*i2hz[0]
+    else:
+        U[x0, y0, z0] += (Sxx[xp1, y0, z0] - Sxx[xm1, y0, z0])*i2hx[0] + (Sxy[x0, yp1, z0] - Sxy[x0, ym1, z0])*i2hy[0] + (Szx[x0, y0, zp1] - Szx[x0, y0, zm1])*i2hz[0]
+        V[x0, y0, z0] += (Sxy[xp1, y0, z0] - Sxy[xm1, y0, z0])*i2hx[0] + (Syy[x0, yp1, z0] - Syy[x0, ym1, z0])*i2hy[0] + (Syz[x0, y0, zp1] - Syz[x0, y0, zm1])*i2hz[0]
+        W[x0, y0, z0] += (Szx[xp1, y0, z0] - Szx[xm1, y0, z0])*i2hx[0] + (Syz[x0, yp1, z0] - Syz[x0, ym1, z0])*i2hy[0] + (Szz[x0, y0, zp1] - Szz[x0, y0, zm1])*i2hz[0]
+
+    #print(Sxx.shape)
+    #print(Sxx[0, 2, 21])
+    #print(np.min(K))
+    #print(np.unravel_index(np.argmax(K, axis=None), K.shape))
+    #print(Sxx[0, 2, 21])
+    #quit()
 
 
 
@@ -1372,7 +1417,7 @@ def main():
     dtnew = 1.0e10
 
     initGrid()
-    initFields(time)
+    time = initFields()
     initMGArrays()
 
     rhs = np.zeros([xSize, Ny+2, Nz+2])
