@@ -1,1 +1,3 @@
-# mpi_CollRrbc
+# MPI PySaras
+
+MPI version of PySaras
