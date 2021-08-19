@@ -1,3 +1,8 @@
+.gitignore
 *.swp
 *.swo
 *.h5
+T_Collocated.png
+*.out
+plot.py
+

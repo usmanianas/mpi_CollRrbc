@@ -27,7 +27,7 @@ nuFlag = False
 lesFlag = False
 
 # Stretching parameter for tangent-hyperbolic grid
-beta = 1.0
+beta = 1.0e-5
 
 # N should be of the form 2^n
 # Then there will be 2^n + 2 points in total, including 2 ghost points
@@ -37,19 +37,19 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 3
+VDepth = 4
 
 # Number of V-cycles to be computed
-vcCnt = 10
+vcCnt = 5
 
 # Number of iterations during pre-smoothing
-preSm = 4
+preSm = 5
 
 # Number of iterations during post-smoothing
-pstSm = 4
+pstSm = 5
 
 # Tolerance value for iterative solver
-tolerance = 1.0e-5
+tolerance = 1.0e-3
 
 # Flag to enable/disable restart of solver from previous solution file
 restartFlag = False
@@ -61,7 +61,7 @@ dt = 0.01
 cflNo = 0.5
 
 # Final time
-tMax = 0.2
+tMax = 0.1
 
 # Number of iterations at which output is sent to standard I/O
 opInt = 1
@@ -92,8 +92,13 @@ Nx, Ny, Nz = sLst[sInd[0]], sLst[sInd[1]], sLst[sInd[2]]
 hx, hy, hz = Lx/(Nx), Ly/(Ny), Lz/(Nz)
 
 xCord = np.linspace(0, Lx + hx, Nx + 2, endpoint=True) - hx/2
+#print(xCord)
+xCord = 0.5*(1.0 - np.tanh(beta*(1.0 - 2*xCord))/np.tanh(beta))
+#print(xCord)
 yCord = np.linspace(0, Ly + hx, Ny + 2, endpoint=True) - hy/2
+yCord = 0.5*(1.0 - np.tanh(beta*(1.0 - 2*yCord))/np.tanh(beta))
 zCord = np.linspace(0, Lz + hx, Nz + 2, endpoint=True) - hz/2
+zCord = 0.5*(1.0 - np.tanh(beta*(1.0 - 2*zCord))/np.tanh(beta))
 
 hx2, hy2, hz2 = hx*hx, hy*hy, hz*hz
 
@@ -508,10 +513,12 @@ def uJacobi(rho):
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
+        jCnt += 1
+
         if totmaxErr < VpTolerance:
+            #if rootRank: print(jCnt)
             break
         
-        jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in U. Aborting")
             quit()
@@ -560,10 +567,12 @@ def vJacobi(rho):
 
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
+        jCnt += 1
+
         if totmaxErr < VpTolerance:
+            #if rootRank: print(jCnt)
             break
     
-        jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in V. Aborting")
             quit()
@@ -612,10 +621,12 @@ def wJacobi(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
+        jCnt += 1
+
         if totmaxErr < VpTolerance:
+            #if rootRank: print(jCnt)
             break
 
-        jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in W. Aborting")
             quit()
@@ -665,15 +676,71 @@ def TJacobi(rho):
     
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
+        jCnt += 1
+
         if totmaxErr < VpTolerance:
+            #if rootRank: print(jCnt)
             break
     
-        jCnt += 1
         if jCnt > maxCount:
             print("ERROR: Jacobi not converging in T. Aborting")
             quit()
     
     return T[x0, y0, z0]       
+
+
+
+
+def PpJacobi(rho):
+    global dt
+    global kappa
+    global nuFlag
+    global ihx2, i2hx, ihy2, i2hy, ihz2, i2hz
+    global xixx, xix2, etyy, ety2, ztzz, ztz2
+
+    jCnt = 0
+    while True:
+
+        imposePpBCs(pData[0])
+
+        if nuFlag:
+            # For non-uniform grid
+            pData[0][1:-1, 1:-1, 1:-1] = (xix2[0] * ihx2[0] * (pData[0][2:, 1:-1, 1:-1] + pData[0][:-2, 1:-1, 1:-1]) +
+                                             xixx[0] * i2hx[0] * (pData[0][2:, 1:-1, 1:-1] - pData[0][:-2, 1:-1, 1:-1]) +
+                                             ety2[0] * ihy2[0] * (pData[0][1:-1, 2:, 1:-1] + pData[0][1:-1, :-2, 1:-1]) +
+                                             etyy[0] * i2hy[0] * (pData[0][1:-1, 2:, 1:-1] - pData[0][1:-1, :-2, 1:-1]) +
+                                             ztz2[0] * ihz2[0] * (pData[0][1:-1, 1:-1, 2:] + pData[0][1:-1, 1:-1, :-2]) +
+                                             ztzz[0] * i2hz[0] * (pData[0][1:-1, 1:-1, 2:] - pData[0][1:-1, 1:-1, :-2]) -
+                                               rho[1:-1, 1:-1, 1:-1]) / (2.0*(ihx2[0]*xix2[0] +
+                                                                             ihy2[0]*ety2[0] + ihz2[0]*ztz2[0]))
+        else:
+            pData[0][1:-1, 1:-1, 1:-1] = (hyhz[0]*(pData[0][2:, 1:-1, 1:-1] + pData[0][:-2, 1:-1, 1:-1]) +
+                                                   hzhx[0]*(pData[0][1:-1, 2:, 1:-1] + pData[0][1:-1, :-2, 1:-1]) +
+                                                   hxhy[0]*(pData[0][1:-1, 1:-1, 2:] + pData[0][1:-1, 1:-1, :-2]) -
+                                                 hxhyhz[0]*rho[1:-1, 1:-1, 1:-1]) * gsFactor[0]
+
+
+        locmaxErr = np.amax(np.abs(rho[1:-1, 1:-1, 1:-1] -((
+                        (pData[0][:-2, 1:-1, 1:-1] - 2.0*pData[0][1:-1, 1:-1, 1:-1] + pData[0][2:, 1:-1, 1:-1])*ihx2[0] +
+                        (pData[0][1:-1, :-2, 1:-1] - 2.0*pData[0][1:-1, 1:-1, 1:-1] + pData[0][1:-1, 2:, 1:-1])*ihy2[0] +
+                        (pData[0][1:-1, 1:-1, :-2] - 2.0*pData[0][1:-1, 1:-1, 1:-1] + pData[0][1:-1, 1:-1, 2:])*ihz2[0]))))
+    
+        totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
+
+        #print(jCnt, totmaxErr)
+
+        jCnt += 1
+
+        if totmaxErr < tolerance:
+            if rootRank: print(jCnt)
+            break
+    
+        if jCnt > maxCount:
+            print("ERROR: Jacobi not converging in Pp. Aborting")
+            quit()
+    
+    return pData[0]       
+
 
 
 ####### Stretch Spiral Vortex LES Model ########
@@ -876,7 +943,9 @@ def multigrid(H):
         chMat = laplace(pData[0])
         locmaxRes = np.amax(np.abs(H[1:-1, 1:-1, 1:-1] - chMat[1:-1, 1:-1, 1:-1]))
         totmaxRes = comm.allreduce(locmaxRes, op=MPI.MAX)
+        #if rootRank: print(i, totmaxRes)
         if totmaxRes < tolerance:
+            #if rootRank: print(i+1)
             break
 
     return pData[0]
@@ -941,18 +1010,16 @@ def smooth(sCount):
 
         if nuFlag:
             # For non-uniform grid
-            for i in range(1, n[0]+1):
-                for j in range(1, n[1]+1):
-                    for k in range(1, n[2]+1):
-                        pData[vLev][i, j, k] = (xix2[vLev][i-1] * ihx2[vLev] * (pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
-                                                xixx[vLev][i-1] * i2hx[vLev] * (pData[vLev][i+1, j, k] - pData[vLev][i-1, j, k]) +
-                                                ety2[vLev][j-1] * ihy2[vLev] * (pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
-                                                etyy[vLev][j-1] * i2hy[vLev] * (pData[vLev][i, j+1, k] - pData[vLev][i, j-1, k]) +
-                                                ztz2[vLev][k-1] * ihz2[vLev] * (pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) +
-                                                ztzz[vLev][k-1] * i2hz[vLev] * (pData[vLev][i, j, k+1] - pData[vLev][i, j, k-1]) -
-                                               rData[vLev][i, j, k]) / (2.0*(ihx2[vLev]*xix2[vLev][i-1] +
-                                                                             ihy2[vLev]*ety2[vLev][j-1] +
-                                                                             ihz2[vLev]*ztz2[vLev][k-1]))
+            
+            pData[vLev][1:-1, 1:-1, 1:-1] = (xix2[vLev] * ihx2[vLev] * (pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
+                                             xixx[vLev] * i2hx[vLev] * (pData[vLev][2:, 1:-1, 1:-1] - pData[vLev][:-2, 1:-1, 1:-1]) +
+                                             ety2[vLev] * ihy2[vLev] * (pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
+                                             etyy[vLev] * i2hy[vLev] * (pData[vLev][1:-1, 2:, 1:-1] - pData[vLev][1:-1, :-2, 1:-1]) +
+                                             ztz2[vLev] * ihz2[vLev] * (pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) +
+                                             ztzz[vLev] * i2hz[vLev] * (pData[vLev][1:-1, 1:-1, 2:] - pData[vLev][1:-1, 1:-1, :-2]) -
+                                               rData[vLev][1:-1, 1:-1, 1:-1]) / (2.0*(ihx2[vLev]*xix2[vLev] +
+                                                                             ihy2[vLev]*ety2[vLev] + ihz2[vLev]*ztz2[vLev]))
+
         else:
             # Vectorized Red-Black Gauss-Seidel
             # Update red cells
@@ -1052,18 +1119,14 @@ def solve():
 
         if nuFlag:
             # For non-uniform grid
-            for i in range(1, n[0]+1):
-                for j in range(1, n[1]+1):
-                    for k in range(1, n[2]+1):
-                        pData[vLev][i, j, k] = (xix2[vLev][i-1] * ihx2[vLev] * (pData[vLev][i+1, j, k] + pData[vLev][i-1, j, k]) +
-                                                xixx[vLev][i-1] * i2hx[vLev] * (pData[vLev][i+1, j, k] - pData[vLev][i-1, j, k]) +
-                                                ety2[vLev][j-1] * ihy2[vLev] * (pData[vLev][i, j+1, k] + pData[vLev][i, j-1, k]) +
-                                                etyy[vLev][j-1] * i2hy[vLev] * (pData[vLev][i, j+1, k] - pData[vLev][i, j-1, k]) +
-                                                ztz2[vLev][k-1] * ihz2[vLev] * (pData[vLev][i, j, k+1] + pData[vLev][i, j, k-1]) +
-                                                ztzz[vLev][k-1] * i2hz[vLev] * (pData[vLev][i, j, k+1] - pData[vLev][i, j, k-1]) -
-                                               rData[vLev][i, j, k]) / (2.0*(ihx2[vLev]*xix2[vLev][i-1] +
-                                                                             ihy2[vLev]*ety2[vLev][j-1] +
-                                                                             ihz2[vLev]*ztz2[vLev][k-1]))
+            pData[vLev][1:-1, 1:-1, 1:-1] = (xix2[vLev] * ihx2[vLev] * (pData[vLev][2:, 1:-1, 1:-1] + pData[vLev][:-2, 1:-1, 1:-1]) +
+                                             xixx[vLev] * i2hx[vLev] * (pData[vLev][2:, 1:-1, 1:-1] - pData[vLev][:-2, 1:-1, 1:-1]) +
+                                             ety2[vLev] * ihy2[vLev] * (pData[vLev][1:-1, 2:, 1:-1] + pData[vLev][1:-1, :-2, 1:-1]) +
+                                             etyy[vLev] * i2hy[vLev] * (pData[vLev][1:-1, 2:, 1:-1] - pData[vLev][1:-1, :-2, 1:-1]) +
+                                             ztz2[vLev] * ihz2[vLev] * (pData[vLev][1:-1, 1:-1, 2:] + pData[vLev][1:-1, 1:-1, :-2]) +
+                                             ztzz[vLev] * i2hz[vLev] * (pData[vLev][1:-1, 1:-1, 2:] - pData[vLev][1:-1, 1:-1, :-2]) -
+                                               rData[vLev][1:-1, 1:-1, 1:-1]) / (2.0*(ihx2[vLev]*xix2[vLev] +
+                                                                             ihy2[vLev]*ety2[vLev] + ihz2[vLev]*ztz2[vLev]))
         else:
             # Vectorized Red-Black Gauss-Seidel
             # Update red cells
@@ -1121,11 +1184,14 @@ def solve():
         locmaxErr = np.amax(np.abs(rData[vLev] - laplace(pData[vLev]))[1:-1, 1:-1, 1:-1])
         totmaxErr = comm.allreduce(locmaxErr, op=MPI.MAX)
 
+        #print(jCnt, totmaxErr)
+
         if totmaxErr < tolerance:
             break
 
         jCnt += 1
         if jCnt > maxCountPp:
+            #print(maxCountPp, totmaxErr)
             print("ERROR: Gauss-Seidel solver not converging. Aborting")
             quit()
 
@@ -1495,6 +1561,7 @@ def main():
                                (W[x0, y0, zp1] - W[x0, y0, zm1]) * i2hz[0])/dt
 
         Pp = multigrid(rhs)
+        #Pp = PpJacobi(rhs)
 
         P[x0, y0, z0] = P[x0, y0, z0] + Pp[x0, y0, z0]
 
