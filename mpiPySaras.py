@@ -27,7 +27,7 @@ nuFlag = False
 lesFlag = False
 
 # Stretching parameter for tangent-hyperbolic grid
-beta = 1.0e-5
+beta = 1.3
 
 # N should be of the form 2^n
 # Then there will be 2^n + 2 points in total, including 2 ghost points
@@ -37,10 +37,10 @@ sLst = [2**x for x in range(12)]
 Lx, Ly, Lz = 1.0, 1.0, 1.0
 
 # Depth of each V-cycle in multigrid
-VDepth = 4
+VDepth = 5
 
 # Number of V-cycles to be computed
-vcCnt = 5
+vcCnt = 10
 
 # Number of iterations during pre-smoothing
 preSm = 5
@@ -49,7 +49,7 @@ preSm = 5
 pstSm = 5
 
 # Tolerance value for iterative solver
-tolerance = 1.0e-3
+tolerance = 1.0e-6
 
 # Flag to enable/disable restart of solver from previous solution file
 restartFlag = False
@@ -61,23 +61,26 @@ dt = 0.01
 cflNo = 0.5
 
 # Final time
-tMax = 0.1
+tMax = 0.2
 
 # Number of iterations at which output is sent to standard I/O
-opInt = 1
+opInt = int(0.01/dt)
 
 # File writing interval
-fwInt = 100.0
+fwInt = 100
+
+# Restart writing interval
+rwInt = 5
 
 # Enable/Disable Parallel I/O
 # WARNING: Parallel h5py truncates floats to a lower precision
 mpiH5Py = False
 
 # Tolerance value in Jacobi iterations
-VpTolerance = 1.0e-5
+VpTolerance = 1.0e-6
 
 # Omega for SOR
-gssor = 1.6
+gssor = 1.0
 
 # Maximum iterations for iterative solvers
 maxCount = 1000
@@ -153,15 +156,15 @@ zm1 = slice(zSt-1, zEn-1)
 zp1 = slice(zSt+1, zEn+1)
 
 if rootRank:
-    print('\n# Grid', Nx, Ny, Nz)
     print('# No. of Processors =', nprocs)
+    print('#', 'Ra=', Ra, 'Pr=', Pr, 'Ta=', Ta)
+    print('# Grid', Nx, Ny, Nz)
+    print('# Domain', Lx, Ly, Lz)
 
 ############### Flow Parameters ###############
 
 nu, kappa = np.sqrt(Pr/Ra), 1.0/np.sqrt(Ra*Pr)
 
-if rootRank:
-    print('#', 'Ra=', Ra, 'Pr=', Pr, 'Ta=', Ta)
 
 
 ############# Fields Initialization ###########
@@ -196,7 +199,7 @@ def initFields():
 
     time = 0.0
     if restartFlag:
-        time = readSoln(U, V, W, P, T)
+        time = readSoln(U, V, W, P, T, time)
 
     if time > tMax:
         if rootRank:
@@ -223,9 +226,7 @@ def writeSoln(U, V, W, P, T, time):
     global Nx, Ny, Nz
 
     fName = "Soln_{0:09.5f}.h5".format(time)
-    if rootRank:
-        print("#Writing solution file: ", fName)        
-
+    
     f = None
     dShape = Nx, Ny, Nz
 
@@ -281,12 +282,77 @@ def writeSoln(U, V, W, P, T, time):
             f.close()
 
 
-def readSoln(U, V, W, P, T):
+
+def writeRestart(U, V, W, P, T, time):
+    global mpiH5Py
+    global gSt, gEn
+    global rootRank
+    global Nx, Ny, Nz
+
+    fName = "Restart.h5"
+    f = None
+    dShape = Nx, Ny, Nz
+
+    if mpiH5Py:
+        f = hp.File(fName, "w", driver='mpio', comm=comm)
+
+        uDset = f.create_dataset("Vx", dShape, dtype = 'f')
+        vDset = f.create_dataset("Vy", dShape, dtype = 'f')
+        wDset = f.create_dataset("Vz", dShape, dtype = 'f')
+        tDset = f.create_dataset("T", dShape, dtype = 'f')
+        pDset = f.create_dataset("P", dShape, dtype = 'f')
+
+        for rCnt in range(nprocs):
+            if rCnt == rank:
+                uDset[gSt:gEn,:,:] = U[1:-1, 1:-1, 1:-1]
+                vDset[gSt:gEn,:,:] = V[1:-1, 1:-1, 1:-1]
+                wDset[gSt:gEn,:,:] = W[1:-1, 1:-1, 1:-1]
+                tDset[gSt:gEn,:,:] = T[1:-1, 1:-1, 1:-1]
+                pDset[gSt:gEn,:,:] = P[1:-1, 1:-1, 1:-1]
+
+        f.close()
+
+    else:
+        if rootRank:
+            f = hp.File(fName, "w")
+
+        dFull = comm.gather(U[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("Vx", data = dFull)
+
+        dFull = comm.gather(V[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("Vy", data = dFull)
+
+        dFull = comm.gather(W[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("Vz", data = dFull)
+
+        dFull = comm.gather(T[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("T", data = dFull)
+
+        dFull = comm.gather(P[1:-1, 1:-1, 1:-1], root=0)
+        if rootRank:
+            dFull = np.concatenate(dFull)
+            dDset = f.create_dataset("P", data = dFull)
+
+        if rootRank:
+            dDset = f.create_dataset("time", data = time)
+            f.close()
+
+
+
+def readSoln(U, V, W, P, T, Time):
     global mpiH5Py
     global gSt, gEn
     global rootRank
 
-    fName = "restartFile.h5"
+    fName = "Restart.h5"
     if rootRank:
         print("#Reading from file: ", fName)        
 
@@ -322,7 +388,7 @@ def readSoln(U, V, W, P, T):
         W[1:-1, 1:-1, 1:-1] = np.array(f["Vz"])[gSt:gEn, :, :]
         P[1:-1, 1:-1, 1:-1] = np.array(f["P"])[gSt:gEn, :, :]
         T[1:-1, 1:-1, 1:-1] = np.array(f["T"])[gSt:gEn, :, :]
-        time = np.array(f["Time"])
+        time = np.array(f["time"])
 
         f.close()
 
@@ -1244,8 +1310,8 @@ def initMGArrays():
 
     if VDepth > maxDepth:
         if rootRank:
-            print("\nWARNING: Specified V-Cycle depth exceed maximum attainable value for grid and processor count.")
-            print("Using new VDepth value = " + str(maxDepth))
+            print("\nWARNING: Specified V-Cycle depth exceed maximum attainable value for grid and processor count. Using new VDepth value = " + str(maxDepth))
+            #print("Using new VDepth value = " + str(maxDepth))
 
         VDepth = maxDepth
 
@@ -1253,6 +1319,7 @@ def initMGArrays():
     N = [(sLst[x[0]], sLst[x[1]], sLst[x[2]]) for x in [sInd - y for y in range(VDepth + 1)]]
     N = [(int(x[0]/nprocs), x[1], x[2]) for x in N]
 
+    '''
     # Finally update max iterations variable
     maxSolCount = 10*N[-1][0]*N[-1][1]*N[-1][2]
 
@@ -1262,6 +1329,7 @@ def initMGArrays():
             print("Using new maximum iteration count = " + str(maxSolCount))
 
         maxCountPp = maxSolCount
+    '''
 
     nList = np.array(N)
 
@@ -1361,9 +1429,9 @@ def initGrid():
     global mghy, yPts, i2hy, ihy2, et_y, etyy, ety2
     global mghz, zPts, i2hz, ihz2, zt_z, ztzz, ztz2
 
-    hx0 = 1.0/(N[0][0])
-    hy0 = 1.0/(N[0][1])
-    hz0 = 1.0/(N[0][2])
+    hx0 = Lx/(N[0][0])
+    hy0 = Ly/(N[0][1])
+    hz0 = Lz/(N[0][2])
 
     # Old coefficients used in old sections of code
     thx2 = [hx*(2**x) for x in range(VDepth+1)]
@@ -1480,6 +1548,7 @@ def main():
     iCnt = 0
     time = 0
     fwTime = 0.0
+    rwTime = 0.0
     dtnew = 1.0e10
 
     initGrid()
@@ -1494,6 +1563,7 @@ def main():
     # Write output at t = 0
     writeSoln(U, V, W, P, T, 0.0)
     fwTime = fwTime + fwInt
+    rwTime = rwTime + rwInt
 
     locU = np.sum(np.sqrt(U[x0, y0, z0]**2.0 + V[x0, y0, z0]**2.0 + W[x0, y0, z0]**2.0))
     locWT = np.sum(W[x0, y0, z0]*T[x0, y0, z0])
@@ -1504,10 +1574,16 @@ def main():
     maxDiv = getDiv(U, V, W)
 
     if rootRank:
-        print('\n# time \t\t Re \t\t Nu \t\t Divergence')
+        print('\n# time \t\t Re \t\t Nu \t\t Divergence \t\t dt')
         Re = globU/(nu*Nx*Ny*Nz)
         Nu = 1.0 + totalWT/(kappa*Nx*Ny*Nz)
-        print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))           
+        print("%f \t %f \t %f \t %.2e \t %f" %(time, Re, Nu, maxDiv, dt))      
+
+        f = open('TimeSeries.dat', 'a')
+        f.write("# %f \t %f \t %i \t %i \t %i \n" %(Ra, Pr, Nx, Ny, Nz)) 
+        f.write('# time, Re, Nu, Divergence, dt \n')
+        f.write("%f \t %f \t %f \t %f \t %f \n" %(time, Re, Nu, maxDiv, dt))
+        f.close()     
 
     while True:
         if iCnt > 1:
@@ -1604,11 +1680,19 @@ def main():
                 wT = np.concatenate(wT)
                 totalWT = (integrate.simps(integrate.simps(integrate.simps(wT, zCord[1:-1]), yCord[1:-1]), xCord[1:-1]))/(Lx*Ly*Lz)
                 Nu = 1.0 + totalWT/kappa
-                print("%f \t %f \t %f \t %.2e" %(time, Re, Nu, maxDiv))     
+                print("%f \t %f \t %f \t %.2e \t %f" %(time, Re, Nu, maxDiv, dt))     
+
+                f = open('TimeSeries.dat', 'a')
+                f.write("%f \t %f \t %f \t %f \t %f \n" %(time, Re, Nu, maxDiv, dt))
+                f.close()
 
         if abs(fwTime - time) < 0.5*dt:
             writeSoln(U, V, W, P, T, time)
             fwTime = fwTime + fwInt
+
+        if abs(rwTime - time) < 0.5*dt:
+            writeRestart(U, V, W, P, T, time)
+            rwTime = rwTime + rwInt
 
         if time + dt/2.0 > tMax:
             break   
